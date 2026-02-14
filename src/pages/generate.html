@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Messaging Engine</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@14/marked.min.js"></script>
+  <style>
+    .tab-active { border-bottom: 2px solid #6366f1; color: #6366f1; font-weight: 600; }
+    .tab-inactive { border-bottom: 2px solid transparent; color: #6b7280; }
+    .tab-inactive:hover { color: #374151; border-color: #d1d5db; }
+    .copy-btn:active { transform: scale(0.95); }
+    .score-bar { height: 4px; border-radius: 2px; transition: width 0.3s; }
+    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .pulse-dot { animation: pulse-dot 1.5s infinite; }
+    .fade-in { animation: fadeIn 0.3s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    pre { white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; }
+
+    /* Prevent content from blowing out card containers */
+    .rendered-content { overflow-wrap: break-word; word-break: break-word; min-width: 0; }
+    .rendered-content * { max-width: 100%; }
+    .rendered-content p, .rendered-content li, .rendered-content blockquote,
+    .rendered-content h1, .rendered-content h2, .rendered-content h3, .rendered-content h4 {
+      overflow-wrap: break-word;
+      word-break: break-word;
+    }
+
+    /* Rendered markdown styles */
+    .rendered-content h1 { font-size: 1.5rem; font-weight: 700; margin: 1.5rem 0 0.75rem; color: #111827; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.5rem; }
+    .rendered-content h2 { font-size: 1.25rem; font-weight: 600; margin: 1.25rem 0 0.5rem; color: #1f2937; }
+    .rendered-content h3 { font-size: 1.1rem; font-weight: 600; margin: 1rem 0 0.5rem; color: #374151; }
+    .rendered-content h4 { font-size: 1rem; font-weight: 600; margin: 0.75rem 0 0.25rem; color: #4b5563; }
+    .rendered-content p { margin: 0.5rem 0; line-height: 1.7; }
+    .rendered-content ul { list-style: disc; margin: 0.5rem 0 0.5rem 1.5rem; }
+    .rendered-content ol { list-style: decimal; margin: 0.5rem 0 0.5rem 1.5rem; }
+    .rendered-content li { margin: 0.25rem 0; line-height: 1.6; }
+    .rendered-content blockquote { border-left: 3px solid #6366f1; padding: 0.5rem 1rem; margin: 0.75rem 0; background: #f9fafb; color: #4b5563; font-style: italic; }
+    .rendered-content code { background: #f3f4f6; padding: 0.15rem 0.35rem; border-radius: 0.25rem; font-size: 0.875em; font-family: ui-monospace, monospace; }
+    .rendered-content pre { background: #1f2937; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin: 0.75rem 0; }
+    .rendered-content pre code { background: none; padding: 0; color: inherit; }
+    .rendered-content table { border-collapse: collapse; margin: 0.75rem 0; display: block; overflow-x: auto; max-width: 100%; }
+    .rendered-content th { background: #f9fafb; font-weight: 600; text-align: left; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; }
+    .rendered-content td { padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; }
+    .rendered-content hr { border: none; border-top: 1px solid #e5e7eb; margin: 1.5rem 0; }
+    .rendered-content strong { font-weight: 600; }
+    .rendered-content a { color: #6366f1; text-decoration: underline; }
+    .rendered-content img { max-width: 100%; }
+
+    /* Section nav */
+    .section-nav { position: sticky; top: 0; z-index: 10; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 0.5rem 0.75rem; margin-bottom: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.25rem; }
+    .section-nav a { font-size: 0.75rem; color: #6366f1; padding: 0.2rem 0.5rem; border-radius: 0.25rem; text-decoration: none; white-space: nowrap; }
+    .section-nav a:hover { background: #eef2ff; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200">
+    <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+      <div>
+        <h1 class="text-xl font-bold text-gray-900">Messaging Engine</h1>
+        <p class="text-sm text-gray-500">Dump docs, get messaging</p>
+      </div>
+      <a href="/admin/" class="text-sm text-gray-500 hover:text-gray-700 transition-colors">Admin</a>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-8">
+    <!-- Input Form -->
+    <div id="input-section">
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Product Documentation</h2>
+
+        <!-- PDF Upload Zone -->
+        <div
+          id="drop-zone"
+          ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)"
+          class="border-2 border-dashed border-gray-300 rounded-lg p-6 mb-4 text-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors"
+          onclick="document.getElementById('file-input').click()"
+        >
+          <input
+            type="file"
+            id="file-input"
+            accept=".pdf,.txt,.md,.doc,.docx"
+            multiple
+            class="hidden"
+            onclick="event.stopPropagation()"
+            onchange="handleFileInput(this)"
+          />
+          <div id="drop-zone-content">
+            <p class="text-sm text-gray-500 mb-1">Drop PDFs here or <span class="text-indigo-600 font-medium">click to upload</span></p>
+            <p class="text-xs text-gray-400">PDF, TXT, MD files — text will be extracted and added below</p>
+          </div>
+          <div id="drop-zone-uploading" class="hidden">
+            <div class="flex items-center justify-center gap-2">
+              <svg class="animate-spin h-4 w-4 text-indigo-500" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+              <span id="drop-zone-status" class="text-sm text-indigo-600">Extracting text from PDF...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Uploaded files list -->
+        <div id="uploaded-files" class="hidden mb-4">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">Uploaded Files</span>
+            <button onclick="clearUploadedFiles()" class="text-xs text-red-500 hover:text-red-700">Clear all</button>
+          </div>
+          <div id="uploaded-files-list" class="space-y-1"></div>
+        </div>
+
+        <textarea
+          id="product-docs"
+          rows="10"
+          class="w-full border border-gray-300 rounded-lg p-4 text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y"
+          placeholder="Paste your PRDs, launch briefs, feature specs, release notes here... or upload PDFs above"
+        ></textarea>
+      </div>
+
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Existing Messaging <span class="text-gray-400 font-normal text-sm">(optional)</span></h2>
+        <textarea
+          id="existing-messaging"
+          rows="4"
+          class="w-full border border-gray-300 rounded-lg p-4 text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-y"
+          placeholder="Paste current messaging for the pipeline to improve or replace..."
+        ></textarea>
+      </div>
+
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-2">Focus / Instructions <span class="text-gray-400 font-normal text-sm">(optional)</span></h2>
+        <input
+          id="prompt"
+          type="text"
+          class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          placeholder='e.g. "Write messaging for the Streams launch" or "Focus on kubernetes monitoring"'
+        />
+      </div>
+
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-3">AI Model</h2>
+        <div class="flex gap-6">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="ai-model" value="claude-opus-4-6" class="text-indigo-600 focus:ring-indigo-500">
+            <span class="text-sm font-medium text-gray-900">Claude Opus 4.6</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="ai-model" value="gemini-3-pro-preview" checked class="text-indigo-600 focus:ring-indigo-500">
+            <span class="text-sm font-medium text-gray-900">Gemini 3 Pro</span>
+            <span class="text-xs text-gray-400">(default)</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-3">Creative Pipeline</h2>
+        <select id="pipeline-select" onchange="updatePipelineDescription()" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+          <option value="standard">Standard — Research then Generate</option>
+          <option value="split-research">Split Research — Competitive + Practitioner Pain separately</option>
+          <option value="outside-in">Outside-In — Start from practitioner pain, refine inward</option>
+          <option value="adversarial">Adversarial — Generate, attack, defend, finalize</option>
+          <option value="multi-perspective">Multi-Perspective — Generate from 3 angles, synthesize</option>
+        </select>
+        <p id="pipeline-description" class="text-xs text-gray-500 mt-2">Deep Research for competitive context, extract insights, generate messaging, score, and refine if needed.</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <!-- Voice Profiles -->
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4">Voice Profiles</h2>
+          <div id="voice-profiles" class="space-y-2">
+            <p class="text-sm text-gray-400">Loading...</p>
+          </div>
+        </div>
+
+        <!-- Asset Types -->
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4">Asset Types</h2>
+          <div id="asset-types" class="space-y-2">
+            <p class="text-sm text-gray-400">Loading...</p>
+          </div>
+        </div>
+      </div>
+
+      <button
+        id="generate-btn"
+        onclick="startGeneration()"
+        class="w-full bg-indigo-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-lg"
+      >
+        Generate Messaging
+      </button>
+    </div>
+
+    <!-- Progress Section -->
+    <div id="progress-section" class="hidden mt-8">
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="flex gap-1">
+            <span class="w-2 h-2 rounded-full bg-indigo-500 pulse-dot"></span>
+            <span class="w-2 h-2 rounded-full bg-indigo-500 pulse-dot" style="animation-delay:0.3s"></span>
+            <span class="w-2 h-2 rounded-full bg-indigo-500 pulse-dot" style="animation-delay:0.6s"></span>
+          </div>
+          <span id="progress-text" class="text-sm font-medium text-gray-700">Starting generation...</span>
+        </div>
+        <div class="w-full bg-gray-200 rounded-full h-2">
+          <div id="progress-bar" class="bg-indigo-500 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+        </div>
+        <p id="progress-detail" class="text-xs text-gray-500 mt-2">This may take a few minutes. The pipeline runs competitive research, then generates and scores messaging for each voice and asset type.</p>
+      </div>
+    </div>
+
+    <!-- Results Section -->
+    <div id="results-section" class="hidden mt-8 fade-in">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-xl font-bold text-gray-900">Results</h2>
+        <button onclick="resetForm()" class="text-sm text-indigo-600 hover:text-indigo-700 font-medium">Generate Again</button>
+      </div>
+
+      <!-- Asset Type Tabs -->
+      <div id="asset-tabs" class="flex gap-1 border-b border-gray-200 mb-6 overflow-x-auto"></div>
+
+      <!-- Tab Content -->
+      <div id="tab-content"></div>
+    </div>
+
+    <!-- Error Section -->
+    <div id="error-section" class="hidden mt-8">
+      <div class="bg-red-50 border border-red-200 rounded-lg p-6">
+        <h3 class="font-semibold text-red-800 mb-2">Generation Failed</h3>
+        <p id="error-message" class="text-sm text-red-700"></p>
+        <button onclick="resetForm()" class="mt-4 text-sm text-red-600 hover:text-red-700 font-medium underline">Try Again</button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    let voices = [];
+    let assetTypes = [];
+    let generationResults = null;
+    let uploadedFileNames = [];
+    let pollInterval = null;
+    let currentJobId = null;
+
+    const PIPELINE_DESCRIPTIONS = {
+      'standard': 'Deep Research for competitive context, extract insights, generate messaging, score, and refine if needed.',
+      'split-research': 'Runs competitive research AND practitioner pain search in parallel for richer context. Barely slower than Standard but with more authentic source material.',
+      'outside-in': 'Generates a first draft grounded purely in practitioner pain, then layers on product specifics and competitive intel. Maximizes authenticity.',
+      'adversarial': 'Generates messaging, then a hostile skeptical practitioner tears it apart, then it rewrites to survive scrutiny. Best for battlecards and talk tracks.',
+      'multi-perspective': 'Generates 3 versions from different angles (empathy, competitive, thought leadership), then synthesizes the best elements. Richest output but 4x generation cost.',
+    };
+
+    function updatePipelineDescription() {
+      const select = document.getElementById('pipeline-select');
+      const desc = document.getElementById('pipeline-description');
+      desc.textContent = PIPELINE_DESCRIPTIONS[select.value] || '';
+    }
+
+    // --- PDF / File Upload ---
+    function handleDragOver(e) {
+      e.preventDefault();
+      e.currentTarget.classList.add('border-indigo-500', 'bg-indigo-50/50');
+    }
+
+    function handleDragLeave(e) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('border-indigo-500', 'bg-indigo-50/50');
+    }
+
+    function handleDrop(e) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('border-indigo-500', 'bg-indigo-50/50');
+      if (e.dataTransfer.files.length > 0) {
+        handleFiles(e.dataTransfer.files);
+      }
+    }
+
+    function handleFileInput(input) {
+      const files = Array.from(input.files || []);
+      input.value = '';
+      if (files.length > 0) handleFiles(files);
+    }
+
+    async function handleFiles(fileList) {
+      if (!fileList || fileList.length === 0) return;
+
+      const contentEl = document.getElementById('drop-zone-content');
+      const uploadingEl = document.getElementById('drop-zone-uploading');
+      const statusEl = document.getElementById('drop-zone-status');
+
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+        const isText = file.type.startsWith('text/') || file.name.endsWith('.md') || file.name.endsWith('.txt');
+
+        if (!isPdf && !isText) {
+          alert(`Unsupported file type: ${file.name}. Use PDF, TXT, or MD files.`);
+          continue;
+        }
+
+        // Read plain text files directly in the browser
+        if (isText) {
+          try {
+            const text = await file.text();
+            appendToProductDocs(`--- ${file.name} ---\n${text}`);
+            addUploadedFile(file.name, text.length);
+          } catch (err) {
+            console.error('Failed to read text file:', file.name, err);
+          }
+          continue;
+        }
+
+        // PDFs: upload to server, then extract
+        contentEl.classList.add('hidden');
+        uploadingEl.classList.remove('hidden');
+        statusEl.textContent = `Uploading ${file.name}...`;
+
+        try {
+          // Step 1: Upload
+          const formData = new FormData();
+          formData.append('file', file);
+
+          const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
+          if (!uploadRes.ok) {
+            const err = await uploadRes.json().catch(() => ({}));
+            throw new Error(err.error || err.details || `Upload failed: HTTP ${uploadRes.status}`);
+          }
+          const { fileId, name } = await uploadRes.json();
+          console.log('Uploaded:', fileId, name);
+
+          // Step 2: Extract text
+          statusEl.textContent = `Extracting text from ${file.name}...`;
+          const extractRes = await fetch('/api/extract', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileId, name }),
+          });
+          if (!extractRes.ok) {
+            const err = await extractRes.json().catch(() => ({}));
+            throw new Error(err.error || err.details || `Extraction failed: HTTP ${extractRes.status}`);
+          }
+          const data = await extractRes.json();
+          console.log('Extracted:', data.name, data.pages, 'pages,', data.text.length, 'chars');
+
+          const header = data.pages > 0 ? `--- ${data.name} (${data.pages} pages) ---` : `--- ${data.name} ---`;
+          appendToProductDocs(`${header}\n${data.text}`);
+          addUploadedFile(data.name, data.text.length, data.pages);
+
+        } catch (err) {
+          console.error('PDF processing failed:', err);
+          alert(`Failed to process ${file.name}: ${err.message}`);
+        } finally {
+          contentEl.classList.remove('hidden');
+          uploadingEl.classList.add('hidden');
+        }
+      }
+    }
+
+    function appendToProductDocs(text) {
+      const textarea = document.getElementById('product-docs');
+      if (textarea.value.trim()) {
+        textarea.value += '\n\n' + text;
+      } else {
+        textarea.value = text;
+      }
+    }
+
+    function addUploadedFile(name, textLength, pages) {
+      uploadedFileNames.push(name);
+      const container = document.getElementById('uploaded-files');
+      const list = document.getElementById('uploaded-files-list');
+      container.classList.remove('hidden');
+
+      const el = document.createElement('div');
+      el.className = 'flex items-center gap-2 text-xs text-gray-600 bg-gray-50 rounded px-3 py-1.5';
+      el.innerHTML = `
+        <span class="text-indigo-500">&#128196;</span>
+        <span class="font-medium">${escapeHtml(name)}</span>
+        ${pages ? `<span class="text-gray-400">${pages} pages</span>` : ''}
+        <span class="text-gray-400">${(textLength / 1024).toFixed(1)}KB text</span>
+      `;
+      list.appendChild(el);
+    }
+
+    function clearUploadedFiles() {
+      uploadedFileNames = [];
+      document.getElementById('uploaded-files-list').innerHTML = '';
+      document.getElementById('uploaded-files').classList.add('hidden');
+      document.getElementById('product-docs').value = '';
+    }
+
+    // Load voices and asset types on page load
+    async function init() {
+      try {
+        const [voicesRes, typesRes] = await Promise.all([
+          fetch('/api/voices').then(r => r.json()),
+          fetch('/api/asset-types').then(r => r.json()),
+        ]);
+
+        voices = voicesRes;
+        assetTypes = typesRes;
+
+        renderVoiceProfiles();
+        renderAssetTypes();
+      } catch (err) {
+        console.error('Failed to load config:', err);
+      }
+    }
+
+    function renderVoiceProfiles() {
+      const container = document.getElementById('voice-profiles');
+      container.innerHTML = voices.map(v => `
+        <label class="flex items-start gap-3 p-2 rounded hover:bg-gray-50 cursor-pointer">
+          <input type="checkbox" value="${v.id}" checked class="voice-cb mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+          <div>
+            <span class="text-sm font-medium text-gray-900">${v.name}</span>
+            <p class="text-xs text-gray-500">${v.description}</p>
+          </div>
+        </label>
+      `).join('');
+    }
+
+    function renderAssetTypes() {
+      const container = document.getElementById('asset-types');
+      container.innerHTML = assetTypes.map(t => `
+        <label class="flex items-center gap-3 p-2 rounded hover:bg-gray-50 cursor-pointer">
+          <input type="checkbox" value="${t.id}" checked class="type-cb rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+          <span class="text-sm font-medium text-gray-900">${t.label}</span>
+        </label>
+      `).join('');
+    }
+
+    async function startGeneration() {
+      const productDocs = document.getElementById('product-docs').value.trim();
+      if (!productDocs) {
+        alert('Please paste your product documentation first.');
+        return;
+      }
+
+      const existingMessaging = document.getElementById('existing-messaging').value.trim() || undefined;
+      const prompt = document.getElementById('prompt').value.trim() || undefined;
+
+      const selectedVoices = [...document.querySelectorAll('.voice-cb:checked')].map(cb => cb.value);
+      const selectedTypes = [...document.querySelectorAll('.type-cb:checked')].map(cb => cb.value);
+      const selectedModel = document.querySelector('input[name="ai-model"]:checked')?.value || 'gemini-3-pro-preview';
+      const selectedPipeline = document.getElementById('pipeline-select').value || 'standard';
+
+      if (selectedVoices.length === 0) {
+        alert('Please select at least one voice profile.');
+        return;
+      }
+      if (selectedTypes.length === 0) {
+        alert('Please select at least one asset type.');
+        return;
+      }
+
+      // Show progress
+      document.getElementById('generate-btn').disabled = true;
+      document.getElementById('progress-section').classList.remove('hidden');
+      document.getElementById('results-section').classList.add('hidden');
+      document.getElementById('error-section').classList.add('hidden');
+      updateProgress(2, 'Submitting job...');
+
+      try {
+        // Step 1: Submit job — returns immediately with jobId
+        const response = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            productDocs,
+            existingMessaging,
+            prompt,
+            voiceProfileIds: selectedVoices,
+            assetTypes: selectedTypes,
+            model: selectedModel,
+            pipeline: selectedPipeline,
+          }),
+        });
+
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          throw new Error(err.error || err.details || `HTTP ${response.status}`);
+        }
+
+        const { jobId } = await response.json();
+        if (!jobId) throw new Error('No jobId returned');
+
+        currentJobId = jobId;
+        updateProgress(5, 'Job submitted, starting pipeline...');
+
+        // Step 2: Poll for progress every 3 seconds
+        pollInterval = setInterval(() => pollJobStatus(jobId), 3000);
+
+      } catch (err) {
+        document.getElementById('progress-section').classList.add('hidden');
+        document.getElementById('error-section').classList.remove('hidden');
+        document.getElementById('error-message').textContent = err.message;
+        document.getElementById('generate-btn').disabled = false;
+      }
+    }
+
+    async function pollJobStatus(jobId) {
+      try {
+        const res = await fetch(`/api/generate/${jobId}`);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `Poll failed: HTTP ${res.status}`);
+        }
+
+        const job = await res.json();
+
+        if (job.status === 'completed') {
+          clearInterval(pollInterval);
+          pollInterval = null;
+          updateProgress(100, 'Complete!');
+          generationResults = { generationId: jobId, results: job.results, research: job.research };
+
+          setTimeout(() => {
+            document.getElementById('progress-section').classList.add('hidden');
+            document.getElementById('generate-btn').disabled = false;
+            renderResults(generationResults);
+          }, 500);
+
+        } else if (job.status === 'failed') {
+          clearInterval(pollInterval);
+          pollInterval = null;
+          document.getElementById('progress-section').classList.add('hidden');
+          document.getElementById('error-section').classList.remove('hidden');
+          document.getElementById('error-message').textContent = job.error || 'Generation failed';
+          document.getElementById('generate-btn').disabled = false;
+
+        } else {
+          // Still running — update progress from server
+          updateProgress(job.progress || 5, job.currentStep || 'Processing...');
+        }
+      } catch (err) {
+        // Network glitch — keep polling, don't abort
+        console.warn('Poll error (will retry):', err.message);
+      }
+    }
+
+    function updateProgress(pct, text) {
+      document.getElementById('progress-bar').style.width = pct + '%';
+      document.getElementById('progress-text').textContent = text;
+    }
+
+    function renderResults(data) {
+      const resultsSection = document.getElementById('results-section');
+      resultsSection.classList.remove('hidden');
+
+      // Build tabs
+      const tabsContainer = document.getElementById('asset-tabs');
+      tabsContainer.innerHTML = data.results.map((r, i) => `
+        <button
+          onclick="switchTab(${i})"
+          id="tab-${i}"
+          class="px-4 py-2 text-sm whitespace-nowrap transition-colors ${i === 0 ? 'tab-active' : 'tab-inactive'}"
+        >${r.label}</button>
+      `).join('');
+
+      // Show first tab
+      switchTab(0);
+    }
+
+    function switchTab(idx) {
+      // Update tab styles
+      document.querySelectorAll('[id^="tab-"]').forEach((tab, i) => {
+        tab.className = `px-4 py-2 text-sm whitespace-nowrap transition-colors ${i === idx ? 'tab-active' : 'tab-inactive'}`;
+      });
+
+      const result = generationResults.results[idx];
+      const contentContainer = document.getElementById('tab-content');
+
+      contentContainer.innerHTML = result.variants.map((variant, vi) => {
+        const vid = variant.id || `${idx}-${vi}`;
+        if (variant.error) {
+          return `
+            <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+              <p class="text-sm font-medium text-red-800">${variant.voiceName}</p>
+              <p class="text-sm text-red-600">Generation failed: ${variant.error}</p>
+            </div>`;
+        }
+
+        const scores = variant.scores || {};
+        return `
+          <div class="bg-white rounded-lg shadow-sm border border-gray-200 mb-4 fade-in overflow-hidden min-w-0">
+            <div class="flex items-center justify-between p-4 border-b border-gray-100">
+              <div class="flex items-center gap-3">
+                <span class="text-sm font-semibold text-gray-900">${variant.voiceName}</span>
+                <span class="text-xs px-2 py-0.5 rounded-full ${variant.passesGates ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}">
+                  ${variant.passesGates ? 'Passes gates' : 'Below threshold'}
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button onclick="toggleView('${vid}')" id="toggle-${vid}" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md transition-colors font-medium">
+                  Source
+                </button>
+                <button onclick="copyMarkdown('${vid}')" class="copy-btn text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md transition-colors font-medium">
+                  Copy Markdown
+                </button>
+              </div>
+            </div>
+
+            <!-- Scores -->
+            <div class="px-4 py-3 border-b border-gray-100 flex gap-6 flex-wrap">
+              ${renderScoreChip('Slop', scores.slop, true)}
+              ${renderScoreChip('Vendor', scores.vendorSpeak, true)}
+              ${renderScoreChip('Auth', scores.authenticity, false)}
+              ${renderScoreChip('Specificity', scores.specificity, false)}
+              ${renderScoreChip('Persona', scores.persona, false)}
+            </div>
+
+            <!-- Section Nav (built after render) -->
+            <div id="nav-${vid}" class="px-4 pt-3"></div>
+
+            <!-- Rendered view (default) -->
+            <div id="rendered-${vid}" class="p-4 rendered-content text-sm text-gray-800 leading-relaxed min-w-0"></div>
+
+            <!-- Source view (hidden) -->
+            <div id="source-${vid}" class="p-4 hidden min-w-0">
+              <pre class="text-sm text-gray-800 leading-relaxed font-mono break-words">${escapeHtml(variant.content)}</pre>
+            </div>
+
+            <!-- Hidden textarea for copy -->
+            <textarea id="raw-${vid}" class="hidden">${escapeHtml(variant.content)}</textarea>
+          </div>`;
+      }).join('');
+
+      // Render markdown and build section navs
+      result.variants.forEach((variant, vi) => {
+        if (variant.error) return;
+        const vid = variant.id || `${idx}-${vi}`;
+        renderMarkdown(vid, variant.content);
+      });
+    }
+
+    function renderScoreChip(label, score, inverted) {
+      if (score == null) return '';
+      const normalized = inverted ? (10 - score) : score;
+      const pct = (normalized / 10) * 100;
+      const color = normalized >= 7 ? 'bg-green-500' : normalized >= 5 ? 'bg-yellow-500' : 'bg-red-500';
+      return `
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-500">${label}</span>
+          <div class="w-16 bg-gray-200 rounded-full overflow-hidden score-bar">
+            <div class="${color} score-bar" style="width: ${pct}%"></div>
+          </div>
+          <span class="text-xs font-medium text-gray-700">${typeof score === 'number' ? score.toFixed(1) : score}</span>
+        </div>`;
+    }
+
+    function renderMarkdown(vid, content) {
+      const el = document.getElementById('rendered-' + vid);
+      if (!el || !content) return;
+      try {
+        el.innerHTML = marked.parse(content);
+      } catch (e) {
+        el.innerHTML = '<pre>' + escapeHtml(content) + '</pre>';
+      }
+      buildSectionNav(vid);
+    }
+
+    function buildSectionNav(vid) {
+      const rendered = document.getElementById('rendered-' + vid);
+      const navContainer = document.getElementById('nav-' + vid);
+      if (!rendered || !navContainer) return;
+
+      const headings = rendered.querySelectorAll('h1, h2, h3');
+      if (headings.length < 2) {
+        navContainer.innerHTML = '';
+        return;
+      }
+
+      headings.forEach((h, i) => {
+        h.id = `${vid}-sec-${i}`;
+      });
+
+      const links = Array.from(headings).map(h => {
+        const indent = h.tagName === 'H3' ? 'ml-3' : h.tagName === 'H2' ? 'ml-1' : '';
+        return `<a href="#${h.id}" class="${indent}">${h.textContent}</a>`;
+      }).join('');
+
+      navContainer.innerHTML = `<div class="section-nav">${links}</div>`;
+    }
+
+    function toggleView(vid) {
+      const rendered = document.getElementById('rendered-' + vid);
+      const source = document.getElementById('source-' + vid);
+      const nav = document.getElementById('nav-' + vid);
+      const btn = document.getElementById('toggle-' + vid);
+      if (!rendered || !source || !btn) return;
+
+      const showingRendered = !rendered.classList.contains('hidden');
+      if (showingRendered) {
+        rendered.classList.add('hidden');
+        if (nav) nav.classList.add('hidden');
+        source.classList.remove('hidden');
+        btn.textContent = 'Rendered';
+      } else {
+        source.classList.add('hidden');
+        rendered.classList.remove('hidden');
+        if (nav) nav.classList.remove('hidden');
+        btn.textContent = 'Source';
+      }
+    }
+
+    function copyMarkdown(vid) {
+      const raw = document.getElementById('raw-' + vid);
+      if (!raw) return;
+      navigator.clipboard.writeText(raw.value).then(() => {
+        // Find the copy button in the same card
+        const card = raw.closest('.bg-white');
+        const btn = card?.querySelector('.copy-btn');
+        if (btn) {
+          const orig = btn.textContent;
+          btn.textContent = 'Copied!';
+          btn.classList.add('bg-green-100', 'text-green-700');
+          setTimeout(() => {
+            btn.textContent = orig;
+            btn.classList.remove('bg-green-100', 'text-green-700');
+          }, 2000);
+        }
+      });
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function resetForm() {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+      currentJobId = null;
+      document.getElementById('results-section').classList.add('hidden');
+      document.getElementById('error-section').classList.add('hidden');
+      document.getElementById('progress-section').classList.add('hidden');
+      document.getElementById('generate-btn').disabled = false;
+      generationResults = null;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    init();
+  </script>
+</body>
+</html>
