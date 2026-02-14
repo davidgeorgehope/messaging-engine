@@ -12,6 +12,7 @@ import { config } from '../config.js';
 import { createDeepResearchInteraction, pollInteractionUntilComplete } from '../services/research/deep-research.js';
 import { PUBLIC_GENERATION_PRIORITY_ID } from '../db/seed.js';
 import { deslop } from '../services/quality/slop-detector.js';
+import { scoreContent, checkQualityGates as checkGates, totalQualityScore, type ScoreResults } from '../services/quality/score-content.js';
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import type { AssetType } from '../services/generation/types.js';
@@ -1204,10 +1205,8 @@ async function generateContent(
 }
 
 // ---------------------------------------------------------------------------
-// Scoring helpers — delegated to shared module
+// Scoring helpers — delegated to shared module (imported at top of file)
 // ---------------------------------------------------------------------------
-
-import { scoreContent, checkQualityGates as checkGates, totalQualityScore, type ScoreResults } from '../services/quality/score-content.js';
 
 function buildRefinementPrompt(
   content: string,

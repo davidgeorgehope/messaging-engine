@@ -224,11 +224,11 @@ export async function startSessionGeneration(sessionId: string) {
   return { session: { ...session, status: 'generating', jobId }, jobId };
 }
 
-export async function getSessionWithResults(sessionId: string, userId?: string) {
+export async function getSessionWithResults(sessionId: string, userId?: string, role?: string) {
   const db = getDatabase();
   const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
   if (!session) return null;
-  if (userId && session.userId !== userId) return null;
+  if (userId && userId !== 'admin-env' && role !== 'admin' && session.userId !== userId) return null;
 
   const response: any = { session };
 
@@ -382,13 +382,14 @@ export async function listUserSessions(
 export async function updateSession(
   sessionId: string,
   userId: string,
-  updates: { name?: string; isArchived?: boolean }
+  updates: { name?: string; isArchived?: boolean },
+  role?: string,
 ) {
   const db = getDatabase();
 
   const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
   if (!session) throw new Error('Session not found');
-  if (session.userId !== userId) throw new Error('Not authorized');
+  if (userId !== 'admin-env' && role !== 'admin' && session.userId !== userId) throw new Error('Not authorized');
 
   const setFields: Record<string, any> = { updatedAt: new Date().toISOString() };
   if (updates.name !== undefined) setFields.name = updates.name;

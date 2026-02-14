@@ -1,66 +1,62 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..');
+const SRC_DIR = join(ROOT, 'src');
+
+/**
+ * Dynamically discover all .ts files under src/ for scanning.
+ * This catches vendor-inversion hacks in new files, not just the original 5.
+ */
+function getAllTsFiles(dir: string): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const fullPath = join(dir, entry);
+    const stat = statSync(fullPath);
+    if (stat.isDirectory()) {
+      files.push(...getAllTsFiles(fullPath));
+    } else if (entry.endsWith('.ts') && !entry.endsWith('.d.ts')) {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
 
 /**
  * Source-level integrity tests.
- * These scan actual source files to ensure the vendor-speak inversion hack
- * (faking authenticity as `10 - vendorSpeakScore`) is not present.
+ * These scan ALL .ts files under src/ to ensure the vendor-speak inversion hack
+ * (faking authenticity as `10 - vendorSpeakScore`) is not present anywhere.
  */
 describe('source-level integrity', () => {
-  const filesToScan = [
-    'src/services/workspace/actions.ts',
-    'src/api/generate.ts',
-    'src/services/workspace/sessions.ts',
-    'src/services/workspace/versions.ts',
-    'src/api/workspace/chat.ts',
-  ];
+  const allTsFiles = getAllTsFiles(SRC_DIR);
+  // Exclude score-content.ts since its totalQualityScore legitimately uses 10 - vendor
+  const filesToScan = allTsFiles.filter(f => !f.endsWith('score-content.ts'));
 
-  describe('vendor-speak inversion hack must not exist', () => {
-    for (const filePath of filesToScan) {
-      const fullPath = join(ROOT, filePath);
+  describe('vendor-speak inversion hack must not exist in any source file', () => {
+    for (const fullPath of filesToScan) {
+      const relativePath = fullPath.replace(ROOT + '/', '');
 
-      it(`${filePath} does not contain Math.max(0, 10 - pattern`, () => {
-        if (!existsSync(fullPath)) {
-          // File may not exist yet; that's fine -- no hack possible
-          return;
-        }
+      it(`${relativePath} does not contain Math.max(0, 10 - pattern`, () => {
         const source = readFileSync(fullPath, 'utf-8');
         expect(source).not.toMatch(/Math\.max\(0,\s*10\s*-/);
       });
 
-      it(`${filePath} does not contain 10 - vendor inversion in scoring`, () => {
-        if (!existsSync(fullPath)) {
-          return;
-        }
+      it(`${relativePath} does not fake authenticity as vendor inversion`, () => {
         const source = readFileSync(fullPath, 'utf-8');
-
-        // Check each line for the vendor inversion pattern, but skip
-        // comments and lines that are in the totalQualityScore formula
-        // (which legitimately uses 10 - slop and 10 - vendor for the total).
         const lines = source.split('\n');
         for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-          const trimmed = line.trim();
+          const trimmed = lines[i].trim();
 
-          // Skip comment lines
+          // Skip comments
           if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) {
             continue;
           }
 
-          // The patterns we're looking for are scoring authenticity as
-          // an inversion of vendor-speak. This is distinct from the
-          // totalQualityScore formula which uses (10 - scores.slopScore)
-          // and (10 - scores.vendorSpeakScore) for aggregation.
-          //
-          // The hack looks like:
-          //   authenticity: Math.max(0, 10 - asset.vendorSpeakScore)
-          //   authenticityScore: 10 - vendorSpeakScore
+          // The hack: authenticity = 10 - vendorSpeakScore
           if (/authenticity.*10\s*-\s*.*vendor/i.test(trimmed)) {
             expect.fail(
-              `${filePath}:${i + 1} contains vendor-speak inversion hack for authenticity: "${trimmed}"`
+              `${relativePath}:${i + 1} contains vendor-speak inversion hack for authenticity: "${trimmed}"`
             );
           }
         }
@@ -98,6 +94,22 @@ describe('source-level integrity', () => {
     it('imports analyzeAuthenticity (not faked)', () => {
       const source = readFileSync(sharedScorerPath, 'utf-8');
       expect(source).toMatch(/import\s+.*analyzeAuthenticity.*from/);
+    });
+  });
+
+  describe('scan coverage', () => {
+    it('scans more than just the original 5 files', () => {
+      // Ensures the dynamic scan is actually finding files
+      expect(filesToScan.length).toBeGreaterThan(5);
+    });
+
+    it('includes the known problem files', () => {
+      const relativePaths = filesToScan.map(f => f.replace(ROOT + '/', ''));
+      expect(relativePaths).toContain('src/services/workspace/actions.ts');
+      expect(relativePaths).toContain('src/api/generate.ts');
+      expect(relativePaths).toContain('src/services/workspace/sessions.ts');
+      expect(relativePaths).toContain('src/services/workspace/versions.ts');
+      expect(relativePaths).toContain('src/api/workspace/chat.ts');
     });
   });
 });

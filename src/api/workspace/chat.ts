@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { eq, and } from 'drizzle-orm';
 import { getDatabase } from '../../db/index.js';
-import { sessionMessages, sessionVersions } from '../../db/schema.js';
+import { sessions, sessionMessages, sessionVersions } from '../../db/schema.js';
 import { generateId } from '../../utils/hash.js';
 import { createLogger } from '../../utils/logger.js';
 import { assembleChatContext } from '../../services/workspace/chat-context.js';
@@ -15,9 +15,21 @@ const logger = createLogger('api:workspace:chat');
 type Variables = { user: { id: string | null; username: string; displayName: string; role: string } };
 const app = new Hono<{ Variables: Variables }>();
 
+async function verifySessionAccess(sessionId: string, user: { id: string | null; role: string }) {
+  const db = getDatabase();
+  const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
+  if (!session) return null;
+  if (user.id && user.id !== 'admin-env' && user.role !== 'admin' && session.userId !== user.id) return null;
+  return session;
+}
+
 // POST /sessions/:id/chat — SSE streaming chat
 app.post('/:id/chat', async (c) => {
   const sessionId = c.req.param('id');
+  const user = c.get('user');
+
+  const session = await verifySessionAccess(sessionId, user);
+  if (!session) return c.json({ error: 'Session not found' }, 404);
 
   let body: any;
   try {
@@ -112,6 +124,10 @@ app.post('/:id/chat', async (c) => {
 app.post('/:id/chat/:messageId/accept', async (c) => {
   const sessionId = c.req.param('id');
   const messageId = c.req.param('messageId');
+  const user = c.get('user');
+
+  const session = await verifySessionAccess(sessionId, user);
+  if (!session) return c.json({ error: 'Session not found' }, 404);
 
   const db = getDatabase();
   const msg = await db.query.sessionMessages.findFirst({
@@ -194,6 +210,11 @@ app.post('/:id/chat/:messageId/accept', async (c) => {
 // GET /sessions/:id/messages — list chat history
 app.get('/:id/messages', async (c) => {
   const sessionId = c.req.param('id');
+  const user = c.get('user');
+
+  const session = await verifySessionAccess(sessionId, user);
+  if (!session) return c.json({ error: 'Session not found' }, 404);
+
   const db = getDatabase();
 
   const messages = await db.query.sessionMessages.findMany({

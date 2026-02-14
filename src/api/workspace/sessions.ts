@@ -78,7 +78,7 @@ app.get('/:id', async (c) => {
   const user = c.get('user');
 
   try {
-    const result = await getSessionWithResults(sessionId, user?.id ?? undefined);
+    const result = await getSessionWithResults(sessionId, user?.id ?? undefined, user?.role);
     if (!result) return c.json({ error: 'Session not found' }, 404);
     return c.json(result);
   } catch (error) {
@@ -96,7 +96,7 @@ app.put('/:id', async (c) => {
   const body = await c.req.json();
 
   try {
-    const session = await updateSession(sessionId, user.id, body);
+    const session = await updateSession(sessionId, user.id, body, user.role);
     return c.json({ session });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update session';
