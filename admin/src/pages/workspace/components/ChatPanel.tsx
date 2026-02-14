@@ -183,7 +183,7 @@ export default function ChatPanel({ sessionId, assetType, onVersionCreated }: Ch
                 : 'bg-gray-100 text-gray-800'
             }`}>
               {msg.role === 'assistant' ? (
-                <div className="prose prose-sm max-w-none prose-p:my-1 prose-headings:my-2">
+                <div className="prose prose-sm max-w-none prose-p:my-1.5 prose-headings:my-2 prose-headings:font-semibold prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-pre:rounded-md prose-pre:text-xs prose-code:text-pink-600 prose-code:before:content-none prose-code:after:content-none prose-blockquote:border-gray-400 prose-blockquote:text-gray-600 prose-a:text-blue-600 prose-hr:my-2 prose-table:text-xs">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {msg.content}
                   </ReactMarkdown>
@@ -212,7 +212,7 @@ export default function ChatPanel({ sessionId, assetType, onVersionCreated }: Ch
         {streaming && streamingText && (
           <div className="flex justify-start">
             <div className="max-w-[85%] rounded-lg px-3 py-2 text-sm bg-gray-100 text-gray-800">
-              <div className="prose prose-sm max-w-none prose-p:my-1">
+              <div className="prose prose-sm max-w-none prose-p:my-1.5 prose-headings:my-2 prose-headings:font-semibold prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0.5 prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-pre:rounded-md prose-pre:text-xs prose-code:text-pink-600 prose-code:before:content-none prose-code:after:content-none prose-blockquote:border-gray-400 prose-blockquote:text-gray-600 prose-a:text-blue-600 prose-hr:my-2 prose-table:text-xs">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {streamingText}
                 </ReactMarkdown>

@@ -596,7 +596,7 @@ export default function SessionWorkspace() {
               />
             </div>
           ) : displayContent ? (
-            <div className="bg-white rounded-lg shadow-sm border border-gray-200 px-6 py-6 prose prose-sm max-w-none">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 px-8 py-8 prose prose-slate max-w-none prose-headings:font-semibold prose-h1:text-xl prose-h2:text-lg prose-h3:text-base prose-p:leading-relaxed prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-pre:rounded-lg prose-pre:text-sm prose-code:text-pink-600 prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:before:content-none prose-code:after:content-none prose-blockquote:border-blue-400 prose-blockquote:bg-blue-50 prose-blockquote:rounded-r-lg prose-blockquote:py-1 prose-blockquote:text-gray-700 prose-a:text-blue-600 prose-strong:text-gray-900 prose-table:text-sm prose-th:bg-gray-50 prose-hr:border-gray-200 prose-li:marker:text-gray-400 prose-img:rounded-lg">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {displayContent}
               </ReactMarkdown>
