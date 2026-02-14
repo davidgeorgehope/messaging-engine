@@ -124,6 +124,7 @@ export const messagingAssets = sqliteTable('messaging_assets', {
   vendorSpeakScore: real('vendor_speak_score'),
   specificityScore: real('specificity_score'),
   personaAvgScore: real('persona_avg_score'),
+  evidenceLevel: text('evidence_level'),
   status: text('status').notNull().default('draft'),
   reviewNotes: text('review_notes'),
   approvedAt: text('approved_at'),

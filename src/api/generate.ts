@@ -16,19 +16,45 @@ import { scoreContent, checkQualityGates as checkGates, totalQualityScore, type 
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import type { AssetType } from '../services/generation/types.js';
-import { extractKeywords, inferSubreddits, inferStackOverflowTags, inferGitHubRepos, engagementScore } from '../services/workspace/actions.js';
-import { inferDiscourseForums, discoverFromDiscourse } from '../services/discovery/sources/discourse.js';
-import { discoverFromReddit } from '../services/discovery/sources/reddit.js';
-import { discoverFromHackerNews } from '../services/discovery/sources/hackernews.js';
-import { discoverFromStackOverflow } from '../services/discovery/sources/stackoverflow.js';
-import { discoverFromGitHub } from '../services/discovery/sources/github.js';
-import { discoverFromGroundedSearch } from '../services/discovery/sources/grounded-search.js';
-import type { RawDiscoveredPainPoint, SourceConfig } from '../services/discovery/types.js';
+import { extractKeywordsAndSources, type DiscoveryInference } from '../services/workspace/actions.js';
+import { validateGrounding } from '../services/quality/grounding-validator.js';
 
 const UPLOADS_DIR = join(process.cwd(), 'data', 'uploads');
 mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const logger = createLogger('api:generate');
+
+// ---------------------------------------------------------------------------
+// Evidence Bundle — threads community evidence through the entire pipeline
+// ---------------------------------------------------------------------------
+
+export interface PractitionerQuote {
+  text: string;
+  source: string;
+  sourceUrl: string;
+}
+
+export interface EvidenceBundle {
+  communityPostCount: number;
+  practitionerQuotes: PractitionerQuote[];
+  communityContextText: string;
+  evidenceLevel: 'strong' | 'partial' | 'product-only';
+  // strong: >= 3 community posts from >= 2 sources
+  // partial: >= 1 community post or grounded search results
+  // product-only: no community evidence found
+  sourceCounts: Record<string, number>;
+}
+
+function classifyEvidenceLevel(
+  postCount: number,
+  sourceTypes: Set<string>,
+  hasGroundedSearch: boolean,
+): EvidenceBundle['evidenceLevel'] {
+  if (postCount >= 3 && sourceTypes.size >= 2) return 'strong';
+  if (postCount >= 1 || hasGroundedSearch) return 'partial';
+  return 'product-only';
+}
+
 
 const TEMPLATE_DIR = join(process.cwd(), 'templates');
 
@@ -206,79 +232,116 @@ async function loadJobInputs(jobId: string): Promise<JobInputs> {
 // Inline Discovery — runs community source discovery during generation
 // ---------------------------------------------------------------------------
 
-async function runInlineDiscovery(productDocs: string, prompt?: string): Promise<string> {
-  try {
-    // Build a minimal session-like object for extractKeywords
-    const sessionLike = { manualPainPoint: prompt || '' };
-    const keywords = extractKeywords(sessionLike, null, productDocs);
+async function runInlineDiscovery(productDocs: string, prompt?: string): Promise<EvidenceBundle> {
+  const emptyBundle: EvidenceBundle = {
+    communityPostCount: 0,
+    practitionerQuotes: [],
+    communityContextText: '',
+    evidenceLevel: 'product-only',
+    sourceCounts: {},
+  };
 
-    if (keywords.length === 0) {
-      logger.info('No keywords extracted for inline discovery');
-      return '';
-    }
+  // Step 1: AI extracts keywords from product docs
+  const sessionLike = { manualPainPoint: prompt || '' };
+  const inference = await extractKeywordsAndSources(sessionLike, null, productDocs);
 
-    logger.info('Running inline discovery', { keywords });
-
-    const sourceConfigs: SourceConfig = {
-      keywords,
-      subreddits: inferSubreddits(keywords),
-      tags: inferStackOverflowTags(keywords),
-      repositories: inferGitHubRepos(keywords),
-      discourseForums: inferDiscourseForums(keywords),
-      maxResults: 10,
-    };
-
-    // Run all sources in parallel, each wrapped in .catch() returning []
-    const [redditPosts, hnPosts, soPosts, ghPosts, discoursePosts] = await Promise.all([
-      discoverFromReddit(sourceConfigs).catch((err) => { logger.warn('Inline Reddit discovery failed', { error: String(err) }); return [] as RawDiscoveredPainPoint[]; }),
-      discoverFromHackerNews(sourceConfigs).catch((err) => { logger.warn('Inline HN discovery failed', { error: String(err) }); return [] as RawDiscoveredPainPoint[]; }),
-      discoverFromStackOverflow(sourceConfigs).catch((err) => { logger.warn('Inline SO discovery failed', { error: String(err) }); return [] as RawDiscoveredPainPoint[]; }),
-      discoverFromGitHub(sourceConfigs).catch((err) => { logger.warn('Inline GitHub discovery failed', { error: String(err) }); return [] as RawDiscoveredPainPoint[]; }),
-      discoverFromDiscourse(sourceConfigs).catch((err) => { logger.warn('Inline Discourse discovery failed', { error: String(err) }); return [] as RawDiscoveredPainPoint[]; }),
-    ]);
-
-    const allPosts = [...redditPosts, ...hnPosts, ...soPosts, ...ghPosts, ...discoursePosts];
-
-    // Also run grounded search for supplemental context
-    let groundedContext = '';
-    try {
-      const groundedResult = await generateWithGeminiGroundedSearch(
-        `Find recent practitioner discussions about: ${keywords.slice(0, 3).join(', ')}. Focus on pain points, frustrations, and unmet needs.`
-      );
-      groundedContext = groundedResult.text;
-    } catch (err) {
-      logger.warn('Inline grounded search failed', { error: String(err) });
-    }
-
-    if (allPosts.length === 0 && !groundedContext) {
-      logger.info('No community posts found during inline discovery');
-      return '';
-    }
-
-    // Sort by engagement, take top 30, format as context string
-    const sorted = [...allPosts].sort((a, b) => engagementScore(b) - engagementScore(a));
-    const topPosts = sorted.slice(0, 30);
-
-    let context = '## Community Discussions\n\n';
-    for (const post of topPosts) {
-      context += `### [${post.sourceType}] ${post.title}\n`;
-      context += `Source: ${post.sourceUrl}\n`;
-      context += `Author: ${post.author}\n`;
-      context += `${post.content.substring(0, 500)}\n\n`;
-    }
-
-    if (groundedContext) {
-      context += `\n## Supplemental Web Research\n${groundedContext.substring(0, 3000)}\n`;
-    }
-
-    logger.info('Inline discovery complete', { posts: allPosts.length, topPosts: topPosts.length });
-    return context;
-  } catch (error) {
-    logger.warn('Inline discovery failed entirely, continuing without it', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return '';
+  if (inference.keywords.length === 0) {
+    logger.warn('No keywords extracted for inline discovery');
+    return emptyBundle;
   }
+
+  logger.info('Running inline discovery via grounded search', { keywords: inference.keywords });
+
+  // Step 2: Fire parallel grounded search queries from different angles
+  // Each query targets a different facet — grounded search handles finding
+  // Reddit, HN, SO, Discourse, blogs, etc. on Google's side
+  const queries = [
+    `${inference.keywords.slice(0, 3).join(' ')} site:reddit.com OR site:news.ycombinator.com practitioner pain frustration complaints`,
+    `${inference.keywords.slice(0, 3).join(' ')} site:stackoverflow.com OR site:serverfault.com problems issues workaround`,
+    `${inference.keywords.slice(0, 4).join(', ')} practitioner opinions frustrations community discussions forum`,
+  ];
+
+  const searchResults = await Promise.all(
+    queries.map((query, i) =>
+      generateWithGeminiGroundedSearch(
+        `Search for real practitioner discussions about: ${query}
+
+Find specific community posts where practitioners express frustration, pain, or opinions. For each result:
+- Include the exact source URL
+- Quote practitioners verbatim where possible
+- Note the community (Reddit, HN, SO, etc.)
+- Focus on authentic practitioner voice, not vendor content
+
+Return detailed findings with source attribution.`,
+        { maxTokens: 4096, temperature: 0.3 },
+      ).catch(err => {
+        logger.warn(`Grounded search query ${i} failed`, { error: String(err) });
+        return null;
+      })
+    )
+  );
+
+  // Step 3: Collect results and source URLs
+  const validResults = searchResults.filter(Boolean) as Exclude<typeof searchResults[number], null>[];
+  const allSources = validResults.flatMap(r => r.sources || []);
+  const allText = validResults.map(r => r.text).filter(t => t.length > 50);
+
+  if (allText.length === 0) {
+    logger.error('All grounded search queries returned empty', { keywords: inference.keywords });
+    return emptyBundle;
+  }
+
+  // Step 4: Build evidence bundle
+  const practitionerQuotes: PractitionerQuote[] = [];
+  for (const source of allSources) {
+    if (source.url && source.title) {
+      practitionerQuotes.push({
+        text: source.snippet || source.title,
+        source: new URL(source.url).hostname.replace('www.', ''),
+        sourceUrl: source.url,
+      });
+    }
+  }
+
+  const sourceCounts: Record<string, number> = { grounded_search: validResults.length };
+  const uniqueHosts = new Set(allSources.map(s => {
+    try { return new URL(s.url).hostname; } catch { return 'unknown'; }
+  }));
+
+  // Classify: strong if we got results from multiple queries with real source URLs
+  const evidenceLevel = classifyEvidenceLevel(
+    allSources.length,
+    uniqueHosts,
+    allText.length > 0,
+  );
+
+  let contextText = '## Verified Community Evidence (USE ONLY THESE)\n\n';
+  for (const result of validResults) {
+    contextText += result.text + '\n\n';
+    if (result.sources?.length) {
+      contextText += 'Sources:\n';
+      for (const s of result.sources) {
+        contextText += `- [${s.title}](${s.url})\n`;
+      }
+      contextText += '\n';
+    }
+  }
+
+  logger.info('Inline discovery via grounded search complete', {
+    queriesRun: queries.length,
+    queriesSucceeded: validResults.length,
+    sourceUrls: allSources.length,
+    uniqueHosts: uniqueHosts.size,
+    evidenceLevel,
+  });
+
+  return {
+    communityPostCount: allSources.length,
+    practitionerQuotes,
+    communityContextText: contextText,
+    evidenceLevel,
+    sourceCounts,
+  };
 }
 
 function updateJobProgress(jobId: string, fields: Record<string, any>) {
@@ -290,7 +353,7 @@ function updateJobProgress(jobId: string, fields: Record<string, any>) {
 }
 
 async function runCompetitiveResearch(productDocs: string, prompt?: string): Promise<string> {
-  const researchPrompt = buildResearchPromptFromDocs(productDocs, prompt);
+  const researchPrompt = await buildResearchPromptFromDocs(productDocs, prompt);
   const interactionId = await createDeepResearchInteraction(researchPrompt);
   const result = await pollInteractionUntilComplete(interactionId);
   return result.text;
@@ -403,10 +466,41 @@ async function storeVariant(
   scores: ScoreResults,
   passesGates: boolean,
   prompt?: string,
+  evidence?: EvidenceBundle,
 ) {
   const db = getDatabase();
   const assetId = generateId();
   const variantId = generateId();
+
+  // Run grounding validation — strip fabrications if no real evidence
+  let finalContent = content;
+  let fabricationStripped = false;
+  if (evidence) {
+    try {
+      const validation = await validateGrounding(content, evidence.evidenceLevel);
+      if (validation.fabricationStripped && validation.strippedContent) {
+        finalContent = validation.strippedContent;
+        fabricationStripped = true;
+        logger.info('Fabrication stripped from generated content', {
+          jobId, assetType, voice: voice.name,
+          patternsFound: validation.fabricationCount,
+        });
+      }
+    } catch (err) {
+      logger.warn('Grounding validation failed, keeping original content', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const metadata: Record<string, any> = {
+    generationId: jobId,
+    voiceId: voice.id,
+    voiceName: voice.name,
+    voiceSlug: voice.slug,
+  };
+  if (fabricationStripped) metadata.fabricationStripped = true;
+  if (evidence) metadata.sourceCounts = evidence.sourceCounts;
 
   await db.insert(messagingAssets).values({
     id: assetId,
@@ -414,12 +508,13 @@ async function storeVariant(
     jobId,
     assetType,
     title: `${ASSET_TYPE_LABELS[assetType]} — ${(prompt || 'Product docs generation').substring(0, 100)}`,
-    content,
-    metadata: JSON.stringify({ generationId: jobId, voiceId: voice.id, voiceName: voice.name, voiceSlug: voice.slug }),
+    content: finalContent,
+    metadata: JSON.stringify(metadata),
     slopScore: scores.slopScore,
     vendorSpeakScore: scores.vendorSpeakScore,
     specificityScore: scores.specificityScore,
     personaAvgScore: scores.personaAvgScore,
+    evidenceLevel: evidence?.evidenceLevel ?? null,
     status: passesGates ? 'review' : 'draft',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -430,7 +525,7 @@ async function storeVariant(
     assetId,
     voiceProfileId: voice.id,
     variantNumber: 1,
-    content,
+    content: finalContent,
     slopScore: scores.slopScore,
     vendorSpeakScore: scores.vendorSpeakScore,
     authenticityScore: scores.authenticityScore,
@@ -441,10 +536,11 @@ async function storeVariant(
     createdAt: new Date().toISOString(),
   });
 
+  // Store real practitioner quotes from the evidence bundle
   await db.insert(assetTraceability).values({
     id: generateId(),
     assetId,
-    practitionerQuotes: JSON.stringify([]),
+    practitionerQuotes: JSON.stringify(evidence?.practitionerQuotes ?? []),
     createdAt: new Date().toISOString(),
   });
 }
@@ -466,7 +562,7 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
 
   // Step 0: Inline community discovery
   updateJobProgress(jobId, { status: 'running', currentStep: 'Discovering community pain points...', progress: 2 });
-  const communityContext = await runInlineDiscovery(productDocs, prompt);
+  const evidence = await runInlineDiscovery(productDocs, prompt);
 
   updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 8 });
 
@@ -480,10 +576,10 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
   }
 
   // Merge community context into research context
-  if (communityContext) {
+  if (evidence.communityContextText) {
     researchContext = researchContext
-      ? `${researchContext}\n\n${communityContext}`
-      : communityContext;
+      ? `${researchContext}\n\n${evidence.communityContextText}`
+      : evidence.communityContextText;
   }
 
   updateJobProgress(jobId, { currentStep: 'Extracting product insights...', progress: 12 });
@@ -497,12 +593,12 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
       updateJobProgress(jobId, { currentStep: `Generating ${ASSET_TYPE_LABELS[assetType]} — ${voice.name}` });
 
       const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
-      const systemPrompt = buildSystemPrompt(voice, assetType);
-      const userPrompt = buildUserPrompt(productDocs, existingMessaging, prompt, researchContext, template, assetType, extractedInsights);
+      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
+      const userPrompt = buildUserPrompt(productDocs, existingMessaging, prompt, researchContext, template, assetType, extractedInsights, evidence.evidenceLevel);
 
       try {
         const result = await generateAndScoreVariant(userPrompt, systemPrompt, selectedModel, productDocs, thresholds, voice, assetType, jobId);
-        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt);
+        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence);
       } catch (error) {
         logger.error('Failed to generate variant', {
           jobId, assetType, voice: voice.name,
@@ -530,7 +626,7 @@ async function runSplitResearchPipeline(jobId: string, inputs: JobInputs): Promi
   updateJobProgress(jobId, { status: 'running', currentStep: 'Running competitive research, practitioner pain search & community discovery...', progress: 3 });
 
   // Parallel research streams (including inline discovery)
-  const [competitiveResult, practitionerResult, communityContext, extractedInsights] = await Promise.all([
+  const [competitiveResult, practitionerResult, evidence, extractedInsights] = await Promise.all([
     runCompetitiveResearch(productDocs, prompt).catch(err => {
       logger.warn('Competitive research failed', { jobId, error: err instanceof Error ? err.message : String(err) });
       return '';
@@ -549,7 +645,7 @@ async function runSplitResearchPipeline(jobId: string, inputs: JobInputs): Promi
   const enrichedResearch = [
     competitiveResult ? `## Competitive Intelligence\n${competitiveResult}` : '',
     practitionerResult ? `## Practitioner Pain (from communities)\n${practitionerResult}` : '',
-    communityContext || '',
+    evidence.communityContextText || '',
   ].filter(Boolean).join('\n\n');
 
   updateJobProgress(jobId, { currentStep: 'Generating messaging...', progress: 20 });
@@ -560,12 +656,12 @@ async function runSplitResearchPipeline(jobId: string, inputs: JobInputs): Promi
       updateJobProgress(jobId, { currentStep: `Generating ${ASSET_TYPE_LABELS[assetType]} — ${voice.name}` });
 
       const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
-      const systemPrompt = buildSystemPrompt(voice, assetType);
-      const userPrompt = buildUserPrompt(productDocs, existingMessaging, prompt, enrichedResearch, template, assetType, extractedInsights);
+      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
+      const userPrompt = buildUserPrompt(productDocs, existingMessaging, prompt, enrichedResearch, template, assetType, extractedInsights, evidence.evidenceLevel);
 
       try {
         const result = await generateAndScoreVariant(userPrompt, systemPrompt, selectedModel, productDocs, thresholds, voice, assetType, jobId);
-        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt);
+        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence);
       } catch (error) {
         logger.error('Failed to generate variant', {
           jobId, assetType, voice: voice.name,
@@ -578,7 +674,7 @@ async function runSplitResearchPipeline(jobId: string, inputs: JobInputs): Promi
     }
   }
 
-  return finalizeJob(jobId, !!(competitiveResult || practitionerResult || communityContext), (competitiveResult + practitionerResult + communityContext).length);
+  return finalizeJob(jobId, !!(competitiveResult || practitionerResult || evidence.communityContextText), (competitiveResult + practitionerResult + evidence.communityContextText).length);
 }
 
 // ---------------------------------------------------------------------------
@@ -593,7 +689,7 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
   // Step 0+1: Search for practitioner pain + inline community discovery in parallel
   updateJobProgress(jobId, { status: 'running', currentStep: 'Discovering community pain points & searching for practitioner pain...', progress: 3 });
 
-  const [practitionerResult, communityContext, extractedInsights] = await Promise.all([
+  const [practitionerResult, evidence, extractedInsights] = await Promise.all([
     runPractitionerPainResearch(productDocs, prompt).catch(error => {
       logger.warn('Practitioner pain research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
       return '';
@@ -602,12 +698,19 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
     extractInsights(productDocs),
   ]);
 
+  // Outside-in pipeline requires community evidence — it's the whole point
+  if (evidence.evidenceLevel === 'product-only' && !practitionerResult) {
+    logger.warn('Outside-in pipeline requires community evidence but none was found. Falling back to standard pipeline.', { jobId });
+    updateJobProgress(jobId, { currentStep: 'No community evidence found — falling back to standard pipeline...' });
+    return runStandardPipeline(jobId, inputs);
+  }
+
   // Merge community context into practitioner context
   let practitionerContext = practitionerResult;
-  if (communityContext) {
+  if (evidence.communityContextText) {
     practitionerContext = practitionerContext
-      ? `${practitionerContext}\n\n${communityContext}`
-      : communityContext;
+      ? `${practitionerContext}\n\n${evidence.communityContextText}`
+      : evidence.communityContextText;
   }
 
   updateJobProgress(jobId, { currentStep: 'Generating pain-grounded draft...', progress: 15 });
@@ -616,7 +719,7 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
     const template = loadTemplate(assetType);
     for (const voice of selectedVoices) {
       const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
-      const systemPrompt = buildSystemPrompt(voice, assetType);
+      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
 
       try {
         // Step 2: Generate pain-grounded first draft (minimal product detail)
@@ -670,7 +773,7 @@ Rewrite with the product specifics and competitive positioning woven in naturall
         };
 
         const best = pickBestResult(firstResult, refinedResult);
-        await storeVariant(jobId, assetType, voice, best.content, best.scores, best.passesGates, prompt);
+        await storeVariant(jobId, assetType, voice, best.content, best.scores, best.passesGates, prompt, evidence);
       } catch (error) {
         logger.error('Failed to generate variant', {
           jobId, assetType, voice: voice.name,
@@ -739,7 +842,7 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
 
   // Step 0: Inline community discovery
   updateJobProgress(jobId, { status: 'running', currentStep: 'Discovering community pain points...', progress: 2 });
-  const communityContext = await runInlineDiscovery(productDocs, prompt);
+  const evidence = await runInlineDiscovery(productDocs, prompt);
 
   // Step 1: Research
   updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 8 });
@@ -752,10 +855,10 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
   }
 
   // Merge community context into research context
-  if (communityContext) {
+  if (evidence.communityContextText) {
     researchContext = researchContext
-      ? `${researchContext}\n\n${communityContext}`
-      : communityContext;
+      ? `${researchContext}\n\n${evidence.communityContextText}`
+      : evidence.communityContextText;
   }
 
   const extractedInsights = await extractInsights(productDocs);
@@ -766,8 +869,8 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
     const template = loadTemplate(assetType);
     for (const voice of selectedVoices) {
       const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
-      const systemPrompt = buildSystemPrompt(voice, assetType);
-      const userPrompt = buildUserPrompt(productDocs, existingMessaging, prompt, researchContext, template, assetType, extractedInsights);
+      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
+      const userPrompt = buildUserPrompt(productDocs, existingMessaging, prompt, researchContext, template, assetType, extractedInsights, evidence.evidenceLevel);
 
       try {
         // Step 2: Generate initial draft
@@ -844,7 +947,7 @@ Output ONLY the rewritten content. No meta-commentary.`;
         };
 
         const best = pickBestResult(initialResult, defendedResult);
-        await storeVariant(jobId, assetType, voice, best.content, best.scores, best.passesGates, prompt);
+        await storeVariant(jobId, assetType, voice, best.content, best.scores, best.passesGates, prompt, evidence);
       } catch (error) {
         logger.error('Failed to generate variant', {
           jobId, assetType, voice: voice.name,
@@ -871,7 +974,7 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
 
   // Step 0: Inline community discovery
   updateJobProgress(jobId, { status: 'running', currentStep: 'Discovering community pain points...', progress: 2 });
-  const communityContext = await runInlineDiscovery(productDocs, prompt);
+  const evidence = await runInlineDiscovery(productDocs, prompt);
 
   // Step 1: Research
   updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 8 });
@@ -884,10 +987,10 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
   }
 
   // Merge community context into research context
-  if (communityContext) {
+  if (evidence.communityContextText) {
     researchContext = researchContext
-      ? `${researchContext}\n\n${communityContext}`
-      : communityContext;
+      ? `${researchContext}\n\n${evidence.communityContextText}`
+      : evidence.communityContextText;
   }
 
   const extractedInsights = await extractInsights(productDocs);
@@ -898,11 +1001,11 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
     const template = loadTemplate(assetType);
     for (const voice of selectedVoices) {
       const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
-      const systemPrompt = buildSystemPrompt(voice, assetType);
+      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
 
       try {
         // Step 2: Generate 3 perspectives in parallel
-        const baseContext = buildUserPrompt(productDocs, existingMessaging, prompt, researchContext, template, assetType, extractedInsights);
+        const baseContext = buildUserPrompt(productDocs, existingMessaging, prompt, researchContext, template, assetType, extractedInsights, evidence.evidenceLevel);
 
         const empathyAngle = `${baseContext}
 
@@ -972,7 +1075,7 @@ Output ONLY the synthesized content. No meta-commentary.`;
         ];
 
         const best = pickBestResult(...candidates);
-        await storeVariant(jobId, assetType, voice, best.content, best.scores, best.passesGates, prompt);
+        await storeVariant(jobId, assetType, voice, best.content, best.scores, best.passesGates, prompt, evidence);
       } catch (error) {
         logger.error('Failed to generate variant', {
           jobId, assetType, voice: voice.name,
@@ -1156,20 +1259,22 @@ function formatInsightsForPrompt(insights: ExtractedInsights): string {
   return sections.join('\n\n');
 }
 
-/** Dispatches generation to the appropriate AI model based on user selection. */
+/** Dispatches generation to the appropriate AI model. Default is Gemini Pro.
+ *  Claude is used only when explicitly selected (model contains 'claude'). */
 async function generateContent(
   prompt: string,
   options: GenerateOptions,
   model?: string,
 ): Promise<AIResponse> {
-  if (model && model.startsWith('gemini')) {
-    return generateWithGemini(prompt, {
-      ...options,
-      model: config.ai.gemini.proModel,
-      maxTokens: options.maxTokens ?? 16000,
-    });
+  if (model && model.includes('claude')) {
+    return generateWithClaude(prompt, { ...options, model });
   }
-  return generateWithClaude(prompt, { ...options, model: model || undefined });
+  // Default: Gemini Pro for all generation
+  return generateWithGemini(prompt, {
+    ...options,
+    model: config.ai.gemini.proModel,
+    maxTokens: options.maxTokens ?? 16000,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1216,11 +1321,25 @@ ${content}
 5. Output ONLY the rewritten content, nothing else`;
 }
 
-function buildResearchPromptFromDocs(productDocs: string, prompt?: string): string {
-  return `Conduct competitive research based on the following product documentation.
+async function buildResearchPromptFromDocs(productDocs: string, prompt?: string): Promise<string> {
+  // Extract structured insights first so we send focused context to Deep Research,
+  // not 10k chars of raw PDF text that might be garbled
+  let productContext: string;
+  try {
+    const insights = await extractInsights(productDocs);
+    if (insights) {
+      productContext = `Product: ${insights.summary}\n\nCapabilities:\n${insights.productCapabilities.map(c => `- ${c}`).join('\n')}\n\nKey Differentiators:\n${insights.keyDifferentiators.map(d => `- ${d}`).join('\n')}\n\nPain Points Addressed:\n${insights.painPointsAddressed.map(p => `- ${p}`).join('\n')}\n\nTarget Personas:\n${insights.targetPersonas.map(p => `- ${p}`).join('\n')}`;
+    } else {
+      productContext = productDocs.substring(0, 6000);
+    }
+  } catch {
+    productContext = productDocs.substring(0, 6000);
+  }
 
-## Product Documentation
-${productDocs.substring(0, 10000)}
+  return `Conduct competitive research based on the following product context.
+
+## Product Context
+${productContext}
 
 ${prompt ? `## Focus Area\n${prompt}\n` : ''}
 
@@ -1273,7 +1392,7 @@ Make it scannable — someone scrolling on their phone should get the core messa
 Every section should pass the 30-second attention test: would they keep reading?`,
 };
 
-function buildSystemPrompt(voice: any, assetType: AssetType): string {
+function buildSystemPrompt(voice: any, assetType: AssetType, evidenceLevel?: EvidenceBundle['evidenceLevel']): string {
   let typeInstructions = '';
 
   if (assetType === 'messaging_template') {
@@ -1322,7 +1441,10 @@ ${typeInstructions}
 5. Every claim must be traceable to the product docs or research
 6. Sound like someone who understands the practitioner's world, not someone selling to them
 7. Be specific — names, numbers, scenarios. Vague messaging is bad messaging.
-8. DO NOT use: "industry-leading", "best-in-class", "next-generation", "enterprise-grade", "mission-critical", "turnkey", "end-to-end", "single pane of glass", "seamless", "robust", "leverage", "cutting-edge", "game-changer"`;
+8. DO NOT use: "industry-leading", "best-in-class", "next-generation", "enterprise-grade", "mission-critical", "turnkey", "end-to-end", "single pane of glass", "seamless", "robust", "leverage", "cutting-edge", "game-changer"
+
+## Evidence Grounding Rules
+${evidenceLevel === 'product-only' ? `CRITICAL: You have NO community evidence for this generation. Do NOT fabricate practitioner quotes or use phrases like "practitioners say...", "as one engineer noted...", "community sentiment suggests...", "teams report...", or "according to engineers on Reddit...". Write from product documentation only. Where practitioner validation would strengthen a point, write: "[Needs community validation]".` : `You have real community evidence in the prompt. ONLY reference practitioners and quotes from the "Verified Community Evidence" section. Do NOT fabricate additional quotes or community references beyond what is provided. Every practitioner reference must come from that section.`}`;
 }
 
 function buildUserPrompt(
@@ -1333,6 +1455,7 @@ function buildUserPrompt(
   template: string,
   assetType: AssetType,
   insights?: ExtractedInsights | null,
+  evidenceLevel?: EvidenceBundle['evidenceLevel'],
 ): string {
   const isLongForm = assetType === 'messaging_template' || assetType === 'narrative';
 

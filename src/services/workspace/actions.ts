@@ -117,76 +117,87 @@ async function loadSessionProductDocs(session: any): Promise<string> {
   return productContext;
 }
 
-const STOPWORDS = new Set([
-  'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our',
-  'out', 'has', 'have', 'been', 'from', 'this', 'that', 'with', 'they', 'will', 'each', 'make',
-  'how', 'what', 'when', 'where', 'which', 'their', 'than', 'them', 'then', 'into', 'some',
-  'could', 'would', 'should', 'about', 'after', 'there', 'these', 'those', 'being', 'between',
-  'does', 'doing', 'just', 'very', 'also', 'more', 'most', 'much', 'need', 'only', 'want',
-  'using', 'used', 'use', 'like', 'well', 'way', 'get', 'got', 'any', 'its', 'let',
-]);
+// ---------------------------------------------------------------------------
+// AI-powered keyword extraction + source inference
+// ---------------------------------------------------------------------------
 
-export function extractKeywords(session: any, painPoint: any, productDocs: string): string[] {
+export interface DiscoveryInference {
+  keywords: string[];
+  subreddits: string[];
+  stackOverflowTags: string[];
+  githubRepos: string[];
+  discourseForums: Array<{ host: string; name: string }>;
+}
+
+/**
+ * Use Gemini Flash to extract search keywords AND infer relevant community sources
+ * in a single LLM call. No naive fallback — if the LLM can't understand the product
+ * docs well enough to extract keywords, the pipeline should not proceed with garbage.
+ * Grounded search (LLM + Google Search) is the guaranteed safety net downstream.
+ */
+export async function extractKeywordsAndSources(
+  session: any,
+  painPoint: any,
+  productDocs: string,
+): Promise<DiscoveryInference> {
   const context = [
     painPoint?.title || '',
     painPoint?.content || '',
     session.manualPainPoint || '',
-    productDocs.substring(0, 2000),
-  ].filter(Boolean).join(' ');
+    productDocs.substring(0, 3000),
+  ].filter(Boolean).join('\n\n');
 
-  if (!context.trim()) return [];
-
-  const words = context
-    .toLowerCase()
-    .split(/[\s,.;:!?()[\]{}"'`\-_/\\|@#$%^&*+=<>~]+/)
-    .filter(w => w.length > 2 && !STOPWORDS.has(w));
-
-  const seen = new Set<string>();
-  const unique: string[] = [];
-  for (const w of words) {
-    if (!seen.has(w)) {
-      seen.add(w);
-      unique.push(w);
-    }
+  if (!context.trim()) {
+    throw new Error('No product context provided — cannot extract keywords');
   }
 
-  return unique.slice(0, 8);
-}
+  const prompt = `Analyze this product/pain context and extract search terms and community sources where practitioners discuss these problems.
 
-export function inferSubreddits(keywords: string[]): string[] {
-  const kw = keywords.join(' ').toLowerCase();
-  const subreddits = ['devops', 'sre'];
-  if (/observ|monitor|metric|trace|log|apm/.test(kw)) subreddits.push('observability', 'prometheus');
-  if (/kubernetes|k8s|helm|kubectl/.test(kw)) subreddits.push('kubernetes');
-  if (/docker|container/.test(kw)) subreddits.push('docker');
-  if (/aws|cloud|azure|gcp/.test(kw)) subreddits.push('aws', 'cloudcomputing');
-  if (/security|siem|threat/.test(kw)) subreddits.push('netsec', 'cybersecurity');
-  if (/data|pipeline|etl|warehouse/.test(kw)) subreddits.push('dataengineering');
-  return [...new Set(subreddits)].slice(0, 6);
-}
+## Context
+${context}
 
-export function inferStackOverflowTags(keywords: string[]): string[] {
-  const kw = keywords.join(' ').toLowerCase();
-  const tags: string[] = [];
-  if (/observ|monitor|metric/.test(kw)) tags.push('monitoring', 'observability');
-  if (/elastic|elasticsearch|kibana/.test(kw)) tags.push('elasticsearch', 'kibana');
-  if (/grafana|prometheus/.test(kw)) tags.push('grafana', 'prometheus');
-  if (/kubernetes|k8s/.test(kw)) tags.push('kubernetes');
-  if (/docker|container/.test(kw)) tags.push('docker');
-  if (/terraform|ansible/.test(kw)) tags.push('terraform');
-  if (/log|logging/.test(kw)) tags.push('logging');
-  return [...new Set(tags)].slice(0, 5);
-}
+Return a JSON object with:
+- "keywords": 5-8 search phrases a practitioner would use when complaining about the problems this product solves. Focus on pain terms (e.g. "alert fatigue", "SOAR sprawl", "too many dashboards"), tool categories, and community jargon. Multi-word phrases are better than single words.
+- "subreddits": 3-6 relevant subreddit names (without r/) where practitioners discuss these topics
+- "stackOverflowTags": 3-5 Stack Overflow tags relevant to this domain
+- "githubRepos": 2-4 GitHub repos (owner/repo format) for major open-source tools in this space that would have relevant issues
+- "discourseForums": 2-4 Discourse forums as objects with "host" (domain) and "name" fields, e.g. {"host": "discuss.kubernetes.io", "name": "Kubernetes Forum"}
 
-export function inferGitHubRepos(keywords: string[]): string[] {
-  const kw = keywords.join(' ').toLowerCase();
-  const repos: string[] = [];
-  if (/elastic|elasticsearch/.test(kw)) repos.push('elastic/elasticsearch');
-  if (/grafana/.test(kw)) repos.push('grafana/grafana');
-  if (/prometheus/.test(kw)) repos.push('prometheus/prometheus');
-  if (/kubernetes|k8s/.test(kw)) repos.push('kubernetes/kubernetes');
-  if (/opentelemetry|otel/.test(kw)) repos.push('open-telemetry/opentelemetry-collector');
-  return repos.slice(0, 4);
+IMPORTANT: Return ONLY valid JSON, no markdown code fences or explanation.`;
+
+  const response = await generateWithGemini(prompt, {
+    temperature: 0.3,
+    maxTokens: 2000,
+  });
+
+  let jsonText = response.text.trim();
+  if (jsonText.startsWith('```')) {
+    jsonText = jsonText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+  }
+
+  const parsed = JSON.parse(jsonText);
+
+  const result: DiscoveryInference = {
+    keywords: Array.isArray(parsed.keywords) ? parsed.keywords.slice(0, 8) : [],
+    subreddits: Array.isArray(parsed.subreddits) ? parsed.subreddits.slice(0, 6) : [],
+    stackOverflowTags: Array.isArray(parsed.stackOverflowTags) ? parsed.stackOverflowTags.slice(0, 5) : [],
+    githubRepos: Array.isArray(parsed.githubRepos) ? parsed.githubRepos.slice(0, 4) : [],
+    discourseForums: Array.isArray(parsed.discourseForums) ? parsed.discourseForums.slice(0, 4) : [],
+  };
+
+  if (result.keywords.length === 0) {
+    throw new Error('AI keyword extraction returned no keywords from the provided context');
+  }
+
+  logger.info('AI keyword/source extraction complete', {
+    keywords: result.keywords,
+    subreddits: result.subreddits,
+    soTags: result.stackOverflowTags,
+    repos: result.githubRepos,
+    forums: result.discourseForums.length,
+  });
+
+  return result;
 }
 
 function buildCompetitiveResearchPrompt(productDocs: string, currentContent: string, assetType: string): string {
@@ -503,21 +514,21 @@ export async function runCommunityCheckAction(sessionId: string, assetType: stri
   logger.info('Running community check action', { sessionId, assetType });
 
   const productDocs = await loadSessionProductDocs(session);
-  const keywords = extractKeywords(session, painPoint, productDocs);
+  const inference = await extractKeywordsAndSources(session, painPoint, productDocs);
 
-  if (keywords.length === 0) {
+  if (inference.keywords.length === 0) {
     throw new Error('Could not extract keywords from session context');
   }
 
-  logger.info('Extracted keywords for community check', { keywords });
+  logger.info('Extracted keywords for community check', { keywords: inference.keywords });
 
   // Hit 5 discovery sources in parallel
   const sourceConfigs: SourceConfig = {
-    keywords,
-    subreddits: inferSubreddits(keywords),
-    tags: inferStackOverflowTags(keywords),
-    repositories: inferGitHubRepos(keywords),
-    discourseForums: inferDiscourseForums(keywords),
+    keywords: inference.keywords,
+    subreddits: inference.subreddits,
+    tags: inference.stackOverflowTags,
+    repositories: inference.githubRepos,
+    discourseForums: inference.discourseForums.length > 0 ? inference.discourseForums : inferDiscourseForums(inference.keywords),
     maxResults: 10,
   };
 
@@ -535,7 +546,7 @@ export async function runCommunityCheckAction(sessionId: string, assetType: stri
   let groundedContext = '';
   try {
     const groundedResult = await generateWithGeminiGroundedSearch(
-      `Find recent practitioner discussions about: ${keywords.slice(0, 3).join(', ')}. Focus on pain points, frustrations, and unmet needs.`
+      `Find recent practitioner discussions about: ${inference.keywords.slice(0, 3).join(', ')}. Focus on pain points, frustrations, and unmet needs.`
     );
     groundedContext = groundedResult.text;
   } catch (err) {
@@ -568,7 +579,7 @@ export async function runCommunityCheckAction(sessionId: string, assetType: stri
       discourse: discoursePosts.length,
     },
     totalPosts: allPosts.length,
-    keywords,
+    keywords: inference.keywords,
     enrichedAt: new Date().toISOString(),
   }, scores, thresholds);
 }
