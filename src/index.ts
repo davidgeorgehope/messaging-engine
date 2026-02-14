@@ -17,33 +17,11 @@ async function main() {
   // Create API
   const app = createApi();
 
-  // Serve generate page at /
-  app.get('/', async (c) => {
-    const fs = await import('fs');
-    const path = await import('path');
-    const htmlPath = path.join(process.cwd(), 'src/pages/generate.html');
-    const html = fs.readFileSync(htmlPath, 'utf-8');
-    return c.html(html);
-  });
-
-  // Serve admin UI static files (assets from build output)
+  // Static assets from Vite build
   app.use('/assets/*', serveStatic({ root: './admin/dist' }));
 
-  // Admin SPA routes
-  app.get('/admin', (c) => c.redirect('/admin/'));
-  app.get('/admin/*', async (c) => {
-    const fs = await import('fs');
-    try {
-      const html = fs.readFileSync('./admin/dist/index.html', 'utf-8');
-      return c.html(html);
-    } catch {
-      return c.text('Admin UI not built. Run: cd admin && npm run build', 500);
-    }
-  });
-
-  // Workspace SPA routes
-  app.get('/workspace', (c) => c.redirect('/workspace/'));
-  app.get('/workspace/*', async (c) => {
+  // SPA: serve index.html for all frontend routes (React Router handles routing)
+  const serveSpa = async (c: any) => {
     const fs = await import('fs');
     try {
       const html = fs.readFileSync('./admin/dist/index.html', 'utf-8');
@@ -51,27 +29,10 @@ async function main() {
     } catch {
       return c.text('UI not built. Run: cd admin && npm run build', 500);
     }
-  });
-
-  // Login/signup SPA routes
-  app.get('/login', async (c) => {
-    const fs = await import('fs');
-    try {
-      const html = fs.readFileSync('./admin/dist/index.html', 'utf-8');
-      return c.html(html);
-    } catch {
-      return c.text('UI not built. Run: cd admin && npm run build', 500);
-    }
-  });
-  app.get('/signup', async (c) => {
-    const fs = await import('fs');
-    try {
-      const html = fs.readFileSync('./admin/dist/index.html', 'utf-8');
-      return c.html(html);
-    } catch {
-      return c.text('UI not built. Run: cd admin && npm run build', 500);
-    }
-  });
+  };
+  for (const route of ['/', '/admin', '/admin/*', '/workspace', '/workspace/*', '/login', '/signup']) {
+    app.get(route, serveSpa);
+  }
 
   // Start server
   const server = serve({
