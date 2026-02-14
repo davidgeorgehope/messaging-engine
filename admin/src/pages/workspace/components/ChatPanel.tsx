@@ -171,7 +171,7 @@ export default function ChatPanel({ sessionId, assetType, onVersionCreated }: Ch
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
         {messages.length === 0 && !streaming && (
           <div className="text-center text-sm text-gray-400 py-8">
-            Ask Claude to refine your messaging. Try: "Make this more specific" or "Add more practitioner empathy"
+            Ask the assistant to refine your messaging. Try: "Make this more specific" or "Add more practitioner empathy"
           </div>
         )}
 
@@ -244,7 +244,7 @@ export default function ChatPanel({ sessionId, assetType, onVersionCreated }: Ch
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask Claude to refine the messaging..."
+            placeholder="Refine the messaging..."
             rows={2}
             className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
             disabled={streaming}
