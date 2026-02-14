@@ -1,4 +1,4 @@
-import { eq, desc, and, sql } from 'drizzle-orm';
+import { eq, desc, and, sql, inArray } from 'drizzle-orm';
 import { getDatabase } from '../../db/index.js';
 import {
   sessions,
@@ -224,10 +224,11 @@ export async function startSessionGeneration(sessionId: string) {
   return { session: { ...session, status: 'generating', jobId }, jobId };
 }
 
-export async function getSessionWithResults(sessionId: string) {
+export async function getSessionWithResults(sessionId: string, userId?: string) {
   const db = getDatabase();
   const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
   if (!session) return null;
+  if (userId && session.userId !== userId) return null;
 
   const response: any = { session };
 
@@ -250,7 +251,10 @@ export async function getSessionWithResults(sessionId: string) {
         where: eq(messagingAssets.jobId, session.jobId!),
       });
 
-      const variants = await db.query.assetVariants.findMany();
+      const assetIds = assets.map(a => a.id);
+      const variants = assetIds.length > 0
+        ? await db.query.assetVariants.findMany({ where: inArray(assetVariants.assetId, assetIds) })
+        : [];
 
       const byType = new Map<string, any>();
       for (const asset of assets) {
@@ -274,7 +278,7 @@ export async function getSessionWithResults(sessionId: string) {
           scores: {
             slop: asset.slopScore,
             vendorSpeak: asset.vendorSpeakScore,
-            authenticity: variant?.authenticityScore ?? (asset.vendorSpeakScore != null ? Math.max(0, 10 - asset.vendorSpeakScore) : null),
+            authenticity: variant?.authenticityScore ?? null,
             specificity: asset.specificityScore,
             persona: asset.personaAvgScore,
           },

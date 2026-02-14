@@ -160,7 +160,7 @@ export async function workspaceAuth(c: Context, next: Next): Promise<Response | 
     } else {
       // Fallback for admin env-var tokens
       c.set('user', {
-        id: null,
+        id: 'admin-env',
         username: payload.sub,
         displayName: payload.sub,
         role: payload.role,

@@ -4,53 +4,11 @@ import { sessions, sessionVersions, voiceProfiles } from '../../db/schema.js';
 import { generateId } from '../../utils/hash.js';
 import { createLogger } from '../../utils/logger.js';
 import { analyzeSlop, deslop } from '../../services/quality/slop-detector.js';
-import { analyzeVendorSpeak } from '../../services/quality/vendor-speak.js';
-import { analyzeSpecificity } from '../../services/quality/specificity.js';
-import { runPersonaCritics } from '../../services/quality/persona-critic.js';
+import { scoreContent, checkQualityGates } from '../quality/score-content.js';
+import type { ScoreResults } from '../quality/score-content.js';
 import type { AssetType } from '../../services/generation/types.js';
 
 const logger = createLogger('workspace:actions');
-
-interface ScoreResults {
-  slopScore: number;
-  vendorSpeakScore: number;
-  authenticityScore: number;
-  specificityScore: number;
-  personaAvgScore: number;
-  slopAnalysis: any;
-}
-
-async function scoreContent(content: string): Promise<ScoreResults> {
-  const [slopAnalysis, vendorAnalysis, specificityAnalysis, personaResults] = await Promise.all([
-    analyzeSlop(content).catch(() => ({ score: 5 })),
-    analyzeVendorSpeak(content).catch(() => ({ score: 5 })),
-    analyzeSpecificity(content, []).catch(() => ({ score: 5 })),
-    runPersonaCritics(content).catch(() => []),
-  ]);
-
-  const personaAvg = personaResults.length > 0
-    ? personaResults.reduce((sum: number, r: any) => sum + r.score, 0) / personaResults.length
-    : 5;
-
-  return {
-    slopScore: (slopAnalysis as any).score,
-    vendorSpeakScore: (vendorAnalysis as any).score,
-    authenticityScore: Math.max(0, 10 - (vendorAnalysis as any).score),
-    specificityScore: (specificityAnalysis as any).score,
-    personaAvgScore: Math.round(personaAvg * 10) / 10,
-    slopAnalysis,
-  };
-}
-
-function checkGates(scores: ScoreResults, thresholds: any): boolean {
-  return (
-    scores.slopScore <= (thresholds.slopMax ?? 5) &&
-    scores.vendorSpeakScore <= (thresholds.vendorSpeakMax ?? 5) &&
-    scores.authenticityScore >= (thresholds.authenticityMin ?? 6) &&
-    scores.specificityScore >= (thresholds.specificityMin ?? 6) &&
-    scores.personaAvgScore >= (thresholds.personaMin ?? 6)
-  );
-}
 
 async function getActiveVersion(sessionId: string, assetType: string) {
   const db = getDatabase();
@@ -101,7 +59,7 @@ async function createVersionAndActivate(
     await db.update(sessionVersions).set({ isActive: false }).where(eq(sessionVersions.id, v.id)).run();
   }
 
-  const passesGates = scores && thresholds ? checkGates(scores, thresholds) : false;
+  const passesGates = scores && thresholds ? checkQualityGates(scores, thresholds) : false;
   const versionId = generateId();
 
   await db.insert(sessionVersions).values({
@@ -250,7 +208,7 @@ export async function runAdversarialLoopAction(sessionId: string, assetType: str
 
   logger.info('Running adversarial loop', { sessionId, assetType });
 
-  while (!checkGates(scores, thresholds) && iteration < maxIterations) {
+  while (!checkQualityGates(scores, thresholds) && iteration < maxIterations) {
     iteration++;
 
     // Deslop if slop is high

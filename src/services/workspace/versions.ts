@@ -1,8 +1,9 @@
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, inArray } from 'drizzle-orm';
 import { getDatabase } from '../../db/index.js';
 import { sessionVersions, sessions, messagingAssets, assetVariants } from '../../db/schema.js';
 import { generateId } from '../../utils/hash.js';
 import { createLogger } from '../../utils/logger.js';
+import { scoreContent, checkQualityGates, DEFAULT_THRESHOLDS } from '../quality/score-content.js';
 import type { AssetType } from '../../services/generation/types.js';
 
 const logger = createLogger('workspace:versions');
@@ -18,7 +19,10 @@ export async function createInitialVersions(sessionId: string, jobId: string) {
     where: eq(messagingAssets.jobId, jobId),
   });
 
-  const allVariants = await db.query.assetVariants.findMany();
+  const assetIds = assets.map(a => a.id);
+  const allVariants = assetIds.length > 0
+    ? await db.query.assetVariants.findMany({ where: inArray(assetVariants.assetId, assetIds) })
+    : [];
 
   for (const asset of assets) {
     const variant = allVariants.find(v => v.assetId === asset.id);
@@ -82,6 +86,10 @@ export async function createEditVersion(sessionId: string, assetType: string, co
       .run();
   }
 
+  // Score the edited content
+  const scores = await scoreContent(content);
+  const passesGates = checkQualityGates(scores, DEFAULT_THRESHOLDS);
+
   const versionId = generateId();
   await db.insert(sessionVersions).values({
     id: versionId,
@@ -91,6 +99,12 @@ export async function createEditVersion(sessionId: string, assetType: string, co
     content,
     source: 'edit',
     sourceDetail: JSON.stringify({ editedAt: new Date().toISOString() }),
+    slopScore: scores.slopScore,
+    vendorSpeakScore: scores.vendorSpeakScore,
+    authenticityScore: scores.authenticityScore,
+    specificityScore: scores.specificityScore,
+    personaAvgScore: scores.personaAvgScore,
+    passesGates,
     isActive: true,
     createdAt: new Date().toISOString(),
   });
@@ -99,7 +113,7 @@ export async function createEditVersion(sessionId: string, assetType: string, co
     where: eq(sessionVersions.id, versionId),
   });
 
-  logger.info('Created edit version', { sessionId, assetType, versionNumber: nextVersion });
+  logger.info('Created edit version', { sessionId, assetType, versionNumber: nextVersion, passesGates });
   return version!;
 }
 

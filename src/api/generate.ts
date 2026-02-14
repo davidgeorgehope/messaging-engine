@@ -4,17 +4,14 @@
 import { Hono } from 'hono';
 import { getDatabase } from '../db/index.js';
 import { voiceProfiles, messagingAssets, assetVariants, assetTraceability, generationJobs } from '../db/schema.js';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { createLogger } from '../utils/logger.js';
 import { generateId } from '../utils/hash.js';
 import { generateWithClaude, generateWithGemini, generateWithGeminiGroundedSearch } from '../services/ai/clients.js';
 import { config } from '../config.js';
 import { createDeepResearchInteraction, pollInteractionUntilComplete } from '../services/research/deep-research.js';
 import { PUBLIC_GENERATION_PRIORITY_ID } from '../db/seed.js';
-import { analyzeSlop, deslop } from '../services/quality/slop-detector.js';
-import { analyzeVendorSpeak } from '../services/quality/vendor-speak.js';
-import { analyzeSpecificity } from '../services/quality/specificity.js';
-import { runPersonaCritics } from '../services/quality/persona-critic.js';
+import { deslop } from '../services/quality/slop-detector.js';
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import type { AssetType } from '../services/generation/types.js';
@@ -269,7 +266,10 @@ app.get('/generate/:id', async (c) => {
       where: eq(messagingAssets.jobId, jobId),
     });
 
-    const variants = await db.query.assetVariants.findMany();
+    const assetIds = assets.map(a => a.id);
+    const variants = assetIds.length > 0
+      ? await db.query.assetVariants.findMany({ where: inArray(assetVariants.assetId, assetIds) })
+      : [];
 
     // Build results in the same shape the frontend expects
     const byType = new Map<string, any>();
@@ -295,7 +295,7 @@ app.get('/generate/:id', async (c) => {
         scores: {
           slop: asset.slopScore,
           vendorSpeak: asset.vendorSpeakScore,
-          authenticity: variant?.authenticityScore ?? (asset.vendorSpeakScore != null ? Math.max(0, 10 - asset.vendorSpeakScore) : null),
+          authenticity: variant?.authenticityScore ?? null,
           specificity: asset.specificityScore,
           persona: asset.personaAvgScore,
         },
@@ -424,7 +424,7 @@ async function generateAndScoreVariant(
   }, model);
 
   let finalContent = response.text;
-  let scores = await scoreContent(finalContent, productDocs);
+  let scores = await scoreContent(finalContent, [productDocs]);
   let passesGates = checkGates(scores, thresholds);
 
   if (refine && !passesGates) {
@@ -452,7 +452,7 @@ async function generateAndScoreVariant(
         temperature: 0.5,
       }, model);
 
-      const refinedScores = await scoreContent(refinedResponse.text, productDocs);
+      const refinedScores = await scoreContent(refinedResponse.text, [productDocs]);
 
       if (totalQualityScore(refinedScores) > totalQualityScore(scores)) {
         finalContent = refinedResponse.text;
@@ -682,7 +682,7 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
         updateJobProgress(jobId, { currentStep: `Running competitive research & scoring — ${voice.name}` });
 
         const [firstScores, competitiveContext] = await Promise.all([
-          scoreContent(firstDraft.text, productDocs),
+          scoreContent(firstDraft.text, [productDocs]),
           runCompetitiveResearch(productDocs, prompt).catch(() => ''),
         ]);
 
@@ -708,7 +708,7 @@ ${template}
 Rewrite with the product specifics and competitive positioning woven in naturally. Keep the pain-first structure. Output ONLY the refined content.`;
 
         const refinedResponse = await generateContent(refinePrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
-        const refinedScores = await scoreContent(refinedResponse.text, productDocs);
+        const refinedScores = await scoreContent(refinedResponse.text, [productDocs]);
 
         // Keep best version
         const firstResult: GenerateAndScoreResult = {
@@ -815,7 +815,7 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
         // Step 2: Generate initial draft
         updateJobProgress(jobId, { currentStep: `Generating initial draft — ${voice.name}` });
         const initialResponse = await generateContent(userPrompt, { systemPrompt, temperature: 0.7 }, selectedModel);
-        const initialScores = await scoreContent(initialResponse.text, productDocs);
+        const initialScores = await scoreContent(initialResponse.text, [productDocs]);
 
         // Step 3: Attack — hostile skeptical practitioner tears it apart
         updateJobProgress(jobId, { currentStep: `Running adversarial critique — ${voice.name}` });
@@ -871,7 +871,7 @@ ${template}
 Output ONLY the rewritten content. No meta-commentary.`;
 
         const defendedResponse = await generateContent(defendPrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
-        const defendedScores = await scoreContent(defendedResponse.text, productDocs);
+        const defendedScores = await scoreContent(defendedResponse.text, [productDocs]);
 
         // Keep best version
         const initialResult: GenerateAndScoreResult = {
@@ -989,10 +989,10 @@ Output ONLY the synthesized content. No meta-commentary.`;
 
         // Step 4: Score all 4 versions, keep the best
         const [empathyScores, competitiveScores, thoughtScores, synthesizedScores] = await Promise.all([
-          scoreContent(empathyRes.text, productDocs),
-          scoreContent(competitiveRes.text, productDocs),
-          scoreContent(thoughtRes.text, productDocs),
-          scoreContent(synthesizedResponse.text, productDocs),
+          scoreContent(empathyRes.text, [productDocs]),
+          scoreContent(competitiveRes.text, [productDocs]),
+          scoreContent(thoughtRes.text, [productDocs]),
+          scoreContent(synthesizedResponse.text, [productDocs]),
         ]);
 
         const candidates: GenerateAndScoreResult[] = [
@@ -1204,55 +1204,10 @@ async function generateContent(
 }
 
 // ---------------------------------------------------------------------------
-// Scoring helpers (Change 4)
+// Scoring helpers — delegated to shared module
 // ---------------------------------------------------------------------------
 
-interface ScoreResults {
-  slopScore: number;
-  vendorSpeakScore: number;
-  authenticityScore: number;
-  specificityScore: number;
-  personaAvgScore: number;
-  slopAnalysis: any;
-}
-
-async function scoreContent(content: string, productDocs: string): Promise<ScoreResults> {
-  const [slopAnalysis, vendorAnalysis, specificityAnalysis, personaResults] = await Promise.all([
-    analyzeSlop(content).catch(() => ({ score: 5 })),
-    analyzeVendorSpeak(content).catch(() => ({ score: 5 })),
-    analyzeSpecificity(content, [productDocs]).catch(() => ({ score: 5 })),
-    runPersonaCritics(content).catch(() => []),
-  ]);
-
-  const personaAvg = personaResults.length > 0
-    ? personaResults.reduce((sum: number, r: any) => sum + r.score, 0) / personaResults.length
-    : 5;
-
-  return {
-    slopScore: (slopAnalysis as any).score,
-    vendorSpeakScore: (vendorAnalysis as any).score,
-    authenticityScore: Math.max(0, 10 - (vendorAnalysis as any).score),
-    specificityScore: (specificityAnalysis as any).score,
-    personaAvgScore: Math.round(personaAvg * 10) / 10,
-    slopAnalysis,
-  };
-}
-
-function checkGates(scores: ScoreResults, thresholds: any): boolean {
-  return (
-    scores.slopScore <= thresholds.slopMax &&
-    scores.vendorSpeakScore <= thresholds.vendorSpeakMax &&
-    scores.authenticityScore >= thresholds.authenticityMin &&
-    scores.specificityScore >= thresholds.specificityMin &&
-    scores.personaAvgScore >= thresholds.personaMin
-  );
-}
-
-function totalQualityScore(scores: ScoreResults): number {
-  // Higher is better: invert slop and vendor (where lower is better)
-  return (10 - scores.slopScore) + (10 - scores.vendorSpeakScore) +
-    scores.authenticityScore + scores.specificityScore + scores.personaAvgScore;
-}
+import { scoreContent, checkQualityGates as checkGates, totalQualityScore, type ScoreResults } from '../services/quality/score-content.js';
 
 function buildRefinementPrompt(
   content: string,

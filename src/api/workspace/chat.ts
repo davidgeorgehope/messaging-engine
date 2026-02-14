@@ -6,6 +6,7 @@ import { sessionMessages, sessionVersions } from '../../db/schema.js';
 import { generateId } from '../../utils/hash.js';
 import { createLogger } from '../../utils/logger.js';
 import { assembleChatContext } from '../../services/workspace/chat-context.js';
+import { scoreContent, checkQualityGates, DEFAULT_THRESHOLDS } from '../../services/quality/score-content.js';
 import { config } from '../../config.js';
 import { desc } from 'drizzle-orm';
 
@@ -154,6 +155,10 @@ app.post('/:id/chat/:messageId/accept', async (c) => {
     await db.update(sessionVersions).set({ isActive: false }).where(eq(sessionVersions.id, v.id)).run();
   }
 
+  // Score the accepted content
+  const scores = await scoreContent(content);
+  const passesGates = checkQualityGates(scores, DEFAULT_THRESHOLDS);
+
   const versionId = generateId();
   await db.insert(sessionVersions).values({
     id: versionId,
@@ -163,6 +168,12 @@ app.post('/:id/chat/:messageId/accept', async (c) => {
     content,
     source: 'chat',
     sourceDetail: JSON.stringify({ messageId, acceptedAt: new Date().toISOString() }),
+    slopScore: scores.slopScore,
+    vendorSpeakScore: scores.vendorSpeakScore,
+    authenticityScore: scores.authenticityScore,
+    specificityScore: scores.specificityScore,
+    personaAvgScore: scores.personaAvgScore,
+    passesGates,
     isActive: true,
     createdAt: new Date().toISOString(),
   });

@@ -75,9 +75,10 @@ app.post('/', async (c) => {
 // GET /sessions/:id — get session with results
 app.get('/:id', async (c) => {
   const sessionId = c.req.param('id');
+  const user = c.get('user');
 
   try {
-    const result = await getSessionWithResults(sessionId);
+    const result = await getSessionWithResults(sessionId, user?.id ?? undefined);
     if (!result) return c.json({ error: 'Session not found' }, 404);
     return c.json(result);
   } catch (error) {
