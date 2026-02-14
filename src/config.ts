@@ -86,6 +86,7 @@ export const config = {
   generation: {
     maxConcurrentJobs: envInt('MAX_CONCURRENT_JOBS', 3),
     maxRetries: envInt('MAX_RETRIES', 3),
+    maxDeslopAttempts: envInt('MAX_DESLOP_ATTEMPTS', 1),
   },
 
   deepResearch: {

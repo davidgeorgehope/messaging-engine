@@ -16,6 +16,7 @@ export interface GenerationContext {
     keywords: string[];
   };
   competitiveResearch?: {
+    researchId: string;
     rawReport: string;
     structuredAnalysis: Record<string, unknown>;
     sources: Array<{ title: string; url: string }>;
