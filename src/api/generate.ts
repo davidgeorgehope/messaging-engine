@@ -26,9 +26,9 @@ const logger = createLogger('api:generate');
 
 const TEMPLATE_DIR = join(process.cwd(), 'templates');
 
-const ALL_ASSET_TYPES: AssetType[] = ['battlecard', 'talk_track', 'launch_messaging', 'social_hook', 'one_pager', 'email_copy', 'messaging_template', 'narrative'];
+export const ALL_ASSET_TYPES: AssetType[] = ['battlecard', 'talk_track', 'launch_messaging', 'social_hook', 'one_pager', 'email_copy', 'messaging_template', 'narrative'];
 
-const ASSET_TYPE_LABELS: Record<AssetType, string> = {
+export const ASSET_TYPE_LABELS: Record<AssetType, string> = {
   battlecard: 'Battlecard',
   talk_track: 'Talk Track',
   launch_messaging: 'Launch Messaging',
@@ -1051,7 +1051,7 @@ const PIPELINE_RUNNERS: Record<string, (jobId: string, inputs: JobInputs) => Pro
   'multi-perspective': runMultiPerspectivePipeline,
 };
 
-async function runPublicGenerationJob(jobId: string): Promise<void> {
+export async function runPublicGenerationJob(jobId: string): Promise<void> {
   const inputs = await loadJobInputs(jobId);
   const pipeline = inputs.pipeline || 'standard';
   const runner = PIPELINE_RUNNERS[pipeline] || PIPELINE_RUNNERS.standard;

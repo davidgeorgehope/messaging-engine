@@ -20,6 +20,7 @@
     "@anthropic-ai/sdk": "^0.39.0",
     "@google/genai": "^1.0.0",
     "@hono/node-server": "^1.13.7",
+    "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.3",
@@ -29,6 +30,7 @@
     "pdf-parse": "^2.4.5"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.0",
     "@types/node-cron": "^3.0.11",

@@ -2,6 +2,7 @@ import * as jose from 'jose';
 import type { Context, Next } from 'hono';
 import { config } from '../../config.js';
 import { createLogger } from '../../utils/logger.js';
+import { getUserById } from '../../services/auth/users.js';
 
 const logger = createLogger('auth');
 
@@ -34,6 +35,7 @@ function parseExpiry(expiry: string): number {
 export interface TokenPayload {
   sub: string;
   role: string;
+  userId?: string;
   iat?: number;
   exp?: number;
 }
@@ -41,18 +43,21 @@ export interface TokenPayload {
 /**
  * Generate a JWT token for the given user.
  */
-export async function generateToken(username: string, role: string = 'admin'): Promise<string> {
+export async function generateToken(username: string, role: string = 'admin', userId?: string): Promise<string> {
   const secret = getSecretKey();
   const expirySeconds = parseExpiry(config.admin.jwtExpiresIn);
 
-  const token = await new jose.SignJWT({ role })
+  const claims: Record<string, unknown> = { role };
+  if (userId) claims.userId = userId;
+
+  const token = await new jose.SignJWT(claims)
     .setProtectedHeader({ alg: 'HS256' })
     .setSubject(username)
     .setIssuedAt()
     .setExpirationTime(`${expirySeconds}s`)
     .sign(secret);
 
-  logger.debug('Token generated', { username, role, expiresIn: config.admin.jwtExpiresIn });
+  logger.debug('Token generated', { username, role, userId, expiresIn: config.admin.jwtExpiresIn });
   return token;
 }
 
@@ -68,6 +73,7 @@ export async function verifyToken(token: string): Promise<TokenPayload> {
     return {
       sub: payload.sub ?? '',
       role: (payload.role as string) ?? 'admin',
+      userId: (payload.userId as string) ?? undefined,
       iat: payload.iat,
       exp: payload.exp,
     };
@@ -116,6 +122,55 @@ export async function adminAuth(c: Context, next: Next): Promise<Response | void
       error: message,
       path: c.req.path,
     });
+    return c.json({ error: message }, 401);
+  }
+}
+
+/**
+ * Hono middleware for workspace routes — requires a valid JWT with a userId.
+ */
+export async function workspaceAuth(c: Context, next: Next): Promise<Response | void> {
+  const authHeader = c.req.header('Authorization');
+
+  if (!authHeader) {
+    return c.json({ error: 'Authorization header required' }, 401);
+  }
+
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    return c.json({ error: 'Authorization header must be: Bearer <token>' }, 401);
+  }
+
+  const token = parts[1];
+
+  try {
+    const payload = await verifyToken(token);
+
+    if (payload.userId) {
+      const user = await getUserById(payload.userId);
+      if (!user || !user.isActive) {
+        return c.json({ error: 'User not found or inactive' }, 401);
+      }
+      c.set('user', {
+        id: user.id,
+        username: user.username,
+        displayName: user.displayName,
+        role: user.role,
+      });
+    } else {
+      // Fallback for admin env-var tokens
+      c.set('user', {
+        id: null,
+        username: payload.sub,
+        displayName: payload.sub,
+        role: payload.role,
+      });
+    }
+
+    await next();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Authentication failed';
+    logger.warn('Workspace auth failed', { error: message, path: c.req.path });
     return c.json({ error: message }, 401);
   }
 }

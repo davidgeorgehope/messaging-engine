@@ -26,10 +26,52 @@ async function main() {
     return c.html(html);
   });
 
-  // Serve admin UI static files
-  app.use('/admin/*', serveStatic({ root: './admin/dist' }));
+  // Serve admin UI static files (assets from build output)
+  app.use('/assets/*', serveStatic({ root: './admin/dist' }));
+
+  // Admin SPA routes
   app.get('/admin', (c) => c.redirect('/admin/'));
-  app.get('/admin/*', serveStatic({ root: './admin/dist', rewriteRequestPath: () => '/index.html' }));
+  app.get('/admin/*', async (c) => {
+    const fs = await import('fs');
+    try {
+      const html = fs.readFileSync('./admin/dist/index.html', 'utf-8');
+      return c.html(html);
+    } catch {
+      return c.text('Admin UI not built. Run: cd admin && npm run build', 500);
+    }
+  });
+
+  // Workspace SPA routes
+  app.get('/workspace', (c) => c.redirect('/workspace/'));
+  app.get('/workspace/*', async (c) => {
+    const fs = await import('fs');
+    try {
+      const html = fs.readFileSync('./admin/dist/index.html', 'utf-8');
+      return c.html(html);
+    } catch {
+      return c.text('UI not built. Run: cd admin && npm run build', 500);
+    }
+  });
+
+  // Login/signup SPA routes
+  app.get('/login', async (c) => {
+    const fs = await import('fs');
+    try {
+      const html = fs.readFileSync('./admin/dist/index.html', 'utf-8');
+      return c.html(html);
+    } catch {
+      return c.text('UI not built. Run: cd admin && npm run build', 500);
+    }
+  });
+  app.get('/signup', async (c) => {
+    const fs = await import('fs');
+    try {
+      const html = fs.readFileSync('./admin/dist/index.html', 'utf-8');
+      return c.html(html);
+    } catch {
+      return c.text('UI not built. Run: cd admin && npm run build', 500);
+    }
+  });
 
   // Start server
   const server = serve({

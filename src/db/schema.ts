@@ -238,6 +238,79 @@ export const assetVariants = sqliteTable('asset_variants', {
 });
 
 // ============================================================================
+// Table 15: users (workspace authentication)
+// ============================================================================
+export const users = sqliteTable('users', {
+  id: text('id').primaryKey(),
+  username: text('username').notNull().unique(),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  displayName: text('display_name').notNull(),
+  role: text('role').notNull().default('user'),
+  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+  lastLoginAt: text('last_login_at'),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+// ============================================================================
+// Table 16: sessions (workspace sessions)
+// ============================================================================
+export const sessions = sqliteTable('sessions', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  painPointId: text('pain_point_id').references(() => discoveredPainPoints.id, { onDelete: 'set null' }),
+  jobId: text('job_id').references(() => generationJobs.id, { onDelete: 'set null' }),
+  voiceProfileId: text('voice_profile_id').references(() => voiceProfiles.id, { onDelete: 'set null' }),
+  assetTypes: text('asset_types').notNull(), // JSON array of AssetType strings
+  status: text('status').notNull().default('pending'),
+  manualPainPoint: text('manual_pain_point'), // JSON: {title, description, quotes?}
+  productDocIds: text('product_doc_ids'), // JSON array of product_documents IDs
+  productContext: text('product_context'), // pasted/uploaded text if no DB docs
+  pipeline: text('pipeline').default('standard'),
+  metadata: text('metadata').default('{}'), // JSON for future extensibility
+  isArchived: integer('is_archived', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+// ============================================================================
+// Table 17: session_versions (workspace asset versions)
+// ============================================================================
+export const sessionVersions = sqliteTable('session_versions', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  assetType: text('asset_type').notNull(),
+  versionNumber: integer('version_number').notNull(),
+  content: text('content').notNull(),
+  source: text('source').notNull(), // 'generation'|'edit'|'deslop'|'regenerate'|'voice_change'|'adversarial'|'chat'
+  sourceDetail: text('source_detail'), // JSON: context about what triggered this version
+  slopScore: real('slop_score'),
+  vendorSpeakScore: real('vendor_speak_score'),
+  authenticityScore: real('authenticity_score'),
+  specificityScore: real('specificity_score'),
+  personaAvgScore: real('persona_avg_score'),
+  passesGates: integer('passes_gates', { mode: 'boolean' }).notNull().default(false),
+  isActive: integer('is_active', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+// ============================================================================
+// Table 18: session_messages (chat refinement)
+// ============================================================================
+export const sessionMessages = sqliteTable('session_messages', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  role: text('role').notNull(), // 'user'|'assistant'
+  content: text('content').notNull(),
+  assetType: text('asset_type'), // which tab was focused, nullable
+  versionCreated: text('version_created'), // version ID if accepted, nullable
+  metadata: text('metadata').default('{}'), // JSON: token usage, model, latency
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+// ============================================================================
 // Type exports
 // ============================================================================
 export type MessagingPriority = typeof messagingPriorities.$inferSelect;
@@ -281,3 +354,15 @@ export type InsertVoiceProfile = typeof voiceProfiles.$inferInsert;
 
 export type AssetVariant = typeof assetVariants.$inferSelect;
 export type InsertAssetVariant = typeof assetVariants.$inferInsert;
+
+export type User = typeof users.$inferSelect;
+export type InsertUser = typeof users.$inferInsert;
+
+export type Session = typeof sessions.$inferSelect;
+export type InsertSession = typeof sessions.$inferInsert;
+
+export type SessionVersion = typeof sessionVersions.$inferSelect;
+export type InsertSessionVersion = typeof sessionVersions.$inferInsert;
+
+export type SessionMessage = typeof sessionMessages.$inferSelect;
+export type InsertSessionMessage = typeof sessionMessages.$inferInsert;

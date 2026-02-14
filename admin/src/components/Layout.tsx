@@ -1,11 +1,11 @@
 import { Outlet, Link, useLocation } from 'react-router-dom';
 
 const NAV_ITEMS = [
-  { path: '/', label: 'Dashboard', icon: '📊' },
-  { path: '/documents', label: 'Product Docs', icon: '📄' },
-  { path: '/voices', label: 'Voice Profiles', icon: '🎙️' },
-  { path: '/history', label: 'History', icon: '📋' },
-  { path: '/settings', label: 'Settings', icon: '⚡' },
+  { path: '/admin', label: 'Dashboard', icon: '📊' },
+  { path: '/admin/documents', label: 'Product Docs', icon: '📄' },
+  { path: '/admin/voices', label: 'Voice Profiles', icon: '🎙️' },
+  { path: '/admin/history', label: 'History', icon: '📋' },
+  { path: '/admin/settings', label: 'Settings', icon: '⚡' },
 ];
 
 export default function Layout() {
@@ -13,7 +13,8 @@ export default function Layout() {
 
   const handleLogout = () => {
     localStorage.removeItem('token');
-    window.location.href = '/admin/login';
+    localStorage.removeItem('user');
+    window.location.href = '/login';
   };
 
   return (
@@ -25,13 +26,21 @@ export default function Layout() {
           <p className="text-xs text-gray-400 mt-1">Admin</p>
         </div>
         <div className="flex-1 overflow-y-auto py-2">
+          {/* Link to workspace */}
+          <Link
+            to="/workspace"
+            className="flex items-center px-4 py-2.5 text-sm text-indigo-300 hover:bg-gray-800 hover:text-indigo-200 transition-colors border-b border-gray-800 mb-1"
+          >
+            <span className="mr-3">✨</span>
+            Workspace
+          </Link>
           {/* Link to public generate page */}
           <a
             href="/"
             className="flex items-center px-4 py-2.5 text-sm text-indigo-300 hover:bg-gray-800 hover:text-indigo-200 transition-colors border-b border-gray-800 mb-1"
           >
-            <span className="mr-3">✨</span>
-            Generate Messaging
+            <span className="mr-3">⚡</span>
+            Quick Generate
           </a>
           {NAV_ITEMS.map((item) => (
             <Link

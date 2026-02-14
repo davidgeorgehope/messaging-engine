@@ -19,7 +19,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (response.status === 401) {
     localStorage.removeItem('token');
-    window.location.href = '/admin/login';
+    localStorage.removeItem('user');
+    window.location.href = '/login';
     throw new Error('Unauthorized');
   }
 
@@ -34,9 +35,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export const api = {
   // Auth
   login: (username: string, password: string) =>
-    request<{ token: string }>('/auth/login', {
+    request<{ token: string; user?: any; expiresIn: string }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ username, password }),
+    }),
+  signup: (data: { username: string; email: string; password: string; displayName: string }) =>
+    request<{ token: string; user: any; expiresIn: string }>('/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify(data),
     }),
 
   // Dashboard
@@ -109,4 +115,45 @@ export const api = {
   getSettings: () => request<any[]>('/admin/settings'),
   updateSetting: (key: string, value: string) =>
     request<any>(`/admin/settings/${key}`, { method: 'PUT', body: JSON.stringify({ value }) }),
+
+  // Public endpoints
+  getVoices: () => request<any[]>('/voices'),
+  getAssetTypes: () => request<any[]>('/asset-types'),
+
+  // Workspace sessions
+  getSessions: (params?: { limit?: string; offset?: string; archived?: string }) => {
+    const query = new URLSearchParams(params || {});
+    return request<{ data: any[] }>(`/workspace/sessions?${query}`);
+  },
+  createSession: (data: any) =>
+    request<{ session: any; jobId: string }>('/workspace/sessions', { method: 'POST', body: JSON.stringify(data) }),
+  getSession: (id: string) => request<any>(`/workspace/sessions/${id}`),
+  updateSession: (id: string, data: any) =>
+    request<{ session: any }>(`/workspace/sessions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getSessionStatus: (id: string) => request<any>(`/workspace/sessions/${id}/status`),
+
+  // Workspace actions
+  runDeslop: (sessionId: string, assetType: string) =>
+    request<{ version: any }>(`/workspace/sessions/${sessionId}/actions/deslop`, { method: 'POST', body: JSON.stringify({ assetType }) }),
+  runRegenerate: (sessionId: string, assetType: string) =>
+    request<{ version: any }>(`/workspace/sessions/${sessionId}/actions/regenerate`, { method: 'POST', body: JSON.stringify({ assetType }) }),
+  runVoiceChange: (sessionId: string, assetType: string, voiceProfileId: string) =>
+    request<{ version: any }>(`/workspace/sessions/${sessionId}/actions/change-voice`, { method: 'POST', body: JSON.stringify({ assetType, voiceProfileId }) }),
+  runAdversarial: (sessionId: string, assetType: string) =>
+    request<{ version: any }>(`/workspace/sessions/${sessionId}/actions/adversarial`, { method: 'POST', body: JSON.stringify({ assetType }) }),
+
+  // Workspace versions
+  getVersions: (sessionId: string, assetType: string) =>
+    request<{ data: any[] }>(`/workspace/sessions/${sessionId}/versions?assetType=${encodeURIComponent(assetType)}`),
+  createVersion: (sessionId: string, data: { assetType: string; content: string }) =>
+    request<{ version: any }>(`/workspace/sessions/${sessionId}/versions`, { method: 'POST', body: JSON.stringify(data) }),
+  activateVersion: (sessionId: string, versionId: string) =>
+    request<{ version: any }>(`/workspace/sessions/${sessionId}/versions/${versionId}/activate`, { method: 'PUT' }),
+
+  // Workspace chat
+  getChatMessages: (sessionId: string) =>
+    request<{ data: any[] }>(`/workspace/sessions/${sessionId}/messages`),
+  acceptChatContent: (sessionId: string, messageId: string) =>
+    request<{ version: any }>(`/workspace/sessions/${sessionId}/chat/${messageId}/accept`, { method: 'POST' }),
+  // streamChat is handled directly via fetch + ReadableStream, not through the api client
 };

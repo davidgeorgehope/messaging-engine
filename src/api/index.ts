@@ -7,6 +7,7 @@ import { config } from '../config.js';
 import { getDatabase } from '../db/index.js';
 import { messagingPriorities, discoveredPainPoints, generationJobs, messagingAssets, voiceProfiles } from '../db/schema.js';
 import { eq } from 'drizzle-orm';
+import { authenticateUser, createUser } from '../services/auth/users.js';
 
 // Admin route imports
 import prioritiesRoutes from './admin/priorities.js';
@@ -22,6 +23,9 @@ import settingsRoutes from './admin/settings.js';
 // Public route imports
 import generateRoutes from './generate.js';
 
+// Workspace route imports
+import workspaceRoutes from './workspace/index.js';
+
 export function createApi() {
   const app = new Hono();
 
@@ -35,15 +39,55 @@ export function createApi() {
   // Public API routes (no auth)
   app.route('/api', generateRoutes);
 
-  // Login
+  // Login — try users table first, then fall back to env var admin
   app.post('/api/auth/login', async (c) => {
     const body = await c.req.json();
     const { username, password } = body;
+
+    // First: check users table
+    const user = await authenticateUser(username, password);
+    if (user) {
+      const token = await generateToken(user.username, user.role, user.id);
+      return c.json({
+        token,
+        user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role },
+        expiresIn: config.admin.jwtExpiresIn,
+      });
+    }
+
+    // Fallback: env var admin credentials
     if (username === config.admin.username && password === config.admin.password) {
       const token = await generateToken(username);
       return c.json({ token, expiresIn: config.admin.jwtExpiresIn });
     }
+
     return c.json({ error: 'Invalid credentials' }, 401);
+  });
+
+  // Signup
+  app.post('/api/auth/signup', async (c) => {
+    try {
+      const body = await c.req.json();
+      const { username, email, password, displayName } = body;
+
+      if (!username || !email || !password || !displayName) {
+        return c.json({ error: 'username, email, password, and displayName are required' }, 400);
+      }
+
+      const user = await createUser({ username, email, password, displayName });
+      const token = await generateToken(user.username, user.role, user.id);
+
+      return c.json({
+        token,
+        user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role },
+        expiresIn: config.admin.jwtExpiresIn,
+      }, 201);
+    } catch (error: any) {
+      if (error.message?.includes('UNIQUE constraint')) {
+        return c.json({ error: 'Username or email already taken' }, 409);
+      }
+      return c.json({ error: error.message || 'Signup failed' }, 500);
+    }
   });
 
   // Admin API routes (protected)
@@ -83,6 +127,9 @@ export function createApi() {
   });
 
   app.route('/api/admin', admin);
+
+  // Workspace API routes (user auth)
+  app.route('/api/workspace', workspaceRoutes);
 
   return app;
 }
