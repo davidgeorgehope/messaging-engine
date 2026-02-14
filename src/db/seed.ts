@@ -1,5 +1,5 @@
 import { getDatabase } from './index.js';
-import { voiceProfiles, messagingPriorities } from './schema.js';
+import { voiceProfiles, messagingPriorities, users } from './schema.js';
 import { generateId } from '../utils/hash.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -160,6 +160,25 @@ If a senior SRE reading this in a Slack channel would eye-roll, rewrite it.`,
 
 export async function seedVoiceProfiles(): Promise<void> {
   const db = getDatabase();
+
+  // Ensure admin-env user exists (FK target for workspace sessions created via env-var login)
+  const existingAdmin = await db.query.users.findFirst({
+    where: (u, { eq }) => eq(u.id, 'admin-env'),
+  });
+  if (!existingAdmin) {
+    await db.insert(users).values({
+      id: 'admin-env',
+      username: 'admin',
+      email: 'admin@localhost',
+      passwordHash: 'env-var-login-only',
+      displayName: 'Admin',
+      role: 'admin',
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    logger.info('Seeded admin-env user for env-var login');
+  }
 
   // Always ensure public generation priority exists (FK target for /api/generate)
   const existingPriority = await db.query.messagingPriorities.findFirst({

@@ -34,14 +34,6 @@ export default function Layout() {
             <span className="mr-3">✨</span>
             Workspace
           </Link>
-          {/* Link to public generate page */}
-          <a
-            href="/"
-            className="flex items-center px-4 py-2.5 text-sm text-indigo-300 hover:bg-gray-800 hover:text-indigo-200 transition-colors border-b border-gray-800 mb-1"
-          >
-            <span className="mr-3">⚡</span>
-            Quick Generate
-          </a>
           {NAV_ITEMS.map((item) => (
             <Link
               key={item.path}

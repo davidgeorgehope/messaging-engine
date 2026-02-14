@@ -4,7 +4,7 @@
 import { Hono } from 'hono';
 import { getDatabase } from '../db/index.js';
 import { voiceProfiles, messagingAssets, assetVariants, assetTraceability, generationJobs } from '../db/schema.js';
-import { eq, inArray } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { createLogger } from '../utils/logger.js';
 import { generateId } from '../utils/hash.js';
 import { generateWithClaude, generateWithGemini, generateWithGeminiGroundedSearch } from '../services/ai/clients.js';
@@ -16,6 +16,14 @@ import { scoreContent, checkQualityGates as checkGates, totalQualityScore, type 
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import type { AssetType } from '../services/generation/types.js';
+import { extractKeywords, inferSubreddits, inferStackOverflowTags, inferGitHubRepos, engagementScore } from '../services/workspace/actions.js';
+import { inferDiscourseForums, discoverFromDiscourse } from '../services/discovery/sources/discourse.js';
+import { discoverFromReddit } from '../services/discovery/sources/reddit.js';
+import { discoverFromHackerNews } from '../services/discovery/sources/hackernews.js';
+import { discoverFromStackOverflow } from '../services/discovery/sources/stackoverflow.js';
+import { discoverFromGitHub } from '../services/discovery/sources/github.js';
+import { discoverFromGroundedSearch } from '../services/discovery/sources/grounded-search.js';
+import type { RawDiscoveredPainPoint, SourceConfig } from '../services/discovery/types.js';
 
 const UPLOADS_DIR = join(process.cwd(), 'data', 'uploads');
 mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -152,168 +160,6 @@ app.get('/asset-types', async (c) => {
   })));
 });
 
-// POST /api/generate — create job, return immediately, run pipeline in background
-app.post('/generate', async (c) => {
-  const body = await c.req.json();
-  const {
-    productDocs,
-    existingMessaging,
-    prompt,
-    voiceProfileIds,
-    assetTypes: requestedTypes,
-    model: requestedModel,
-    pipeline: requestedPipeline,
-  } = body;
-
-  if (!productDocs || productDocs.trim().length === 0) {
-    return c.json({ error: 'productDocs is required' }, 400);
-  }
-
-  const db = getDatabase();
-
-  // Validate voice profiles upfront
-  const allVoices = await db.query.voiceProfiles.findMany({
-    where: eq(voiceProfiles.isActive, true),
-  });
-
-  const selectedVoiceIds = voiceProfileIds && voiceProfileIds.length > 0
-    ? voiceProfileIds.filter((id: string) => allVoices.some(v => v.id === id))
-    : allVoices.map(v => v.id);
-
-  if (selectedVoiceIds.length === 0) {
-    return c.json({ error: 'No voice profiles selected or available' }, 400);
-  }
-
-  const selectedAssetTypes: AssetType[] = requestedTypes && requestedTypes.length > 0
-    ? requestedTypes.filter((t: string) => ALL_ASSET_TYPES.includes(t as AssetType))
-    : [...ALL_ASSET_TYPES];
-
-  // Create job row
-  const jobId = generateId();
-  const now = new Date().toISOString();
-
-  await db.insert(generationJobs).values({
-    id: jobId,
-    status: 'pending',
-    currentStep: 'Queued',
-    progress: 0,
-    productContext: JSON.stringify({
-      productDocs,
-      existingMessaging,
-      prompt,
-      voiceProfileIds: selectedVoiceIds,
-      assetTypes: selectedAssetTypes,
-      model: requestedModel || 'gemini-3-pro-preview',
-      pipeline: requestedPipeline || 'standard',
-    }),
-    startedAt: now,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  logger.info('Job created, starting background pipeline', { jobId });
-
-  // Fire-and-forget — run pipeline in background
-  runPublicGenerationJob(jobId).catch((error) => {
-    logger.error('Background generation job crashed', {
-      jobId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    const db = getDatabase();
-    db.update(generationJobs)
-      .set({
-        status: 'failed',
-        errorMessage: error instanceof Error ? error.message : String(error),
-        errorStack: error instanceof Error ? error.stack : undefined,
-        completedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(generationJobs.id, jobId))
-      .run();
-  });
-
-  return c.json({ jobId }, 202);
-});
-
-// GET /api/generate/:id — poll job status
-app.get('/generate/:id', async (c) => {
-  const jobId = c.req.param('id');
-  const db = getDatabase();
-
-  const job = await db.query.generationJobs.findFirst({
-    where: eq(generationJobs.id, jobId),
-  });
-
-  if (!job) {
-    return c.json({ error: 'Job not found' }, 404);
-  }
-
-  const response: any = {
-    jobId: job.id,
-    status: job.status,
-    currentStep: job.currentStep,
-    progress: job.progress,
-    startedAt: job.startedAt,
-    completedAt: job.completedAt,
-  };
-
-  if (job.status === 'failed') {
-    response.error = job.errorMessage;
-  }
-
-  if (job.status === 'completed') {
-    // Fetch generated assets for this job, grouped by asset type
-    const assets = await db.query.messagingAssets.findMany({
-      where: eq(messagingAssets.jobId, jobId),
-    });
-
-    const assetIds = assets.map(a => a.id);
-    const variants = assetIds.length > 0
-      ? await db.query.assetVariants.findMany({ where: inArray(assetVariants.assetId, assetIds) })
-      : [];
-
-    // Build results in the same shape the frontend expects
-    const byType = new Map<string, any>();
-    for (const asset of assets) {
-      const meta = JSON.parse(asset.metadata || '{}');
-      if (!byType.has(asset.assetType)) {
-        byType.set(asset.assetType, {
-          assetType: asset.assetType,
-          label: ASSET_TYPE_LABELS[asset.assetType as AssetType] || asset.assetType,
-          variants: [],
-        });
-      }
-
-      // Find the variant for this asset
-      const variant = variants.find(v => v.assetId === asset.id);
-
-      byType.get(asset.assetType).variants.push({
-        id: variant?.id || asset.id,
-        voiceProfileId: meta.voiceId,
-        voiceName: meta.voiceName,
-        voiceSlug: meta.voiceSlug,
-        content: asset.content,
-        scores: {
-          slop: asset.slopScore,
-          vendorSpeak: asset.vendorSpeakScore,
-          authenticity: variant?.authenticityScore ?? null,
-          specificity: asset.specificityScore,
-          persona: asset.personaAvgScore,
-        },
-        passesGates: variant?.passesGates ?? false,
-      });
-    }
-
-    response.results = Array.from(byType.values());
-    // Include research availability from job context
-    const ctx = JSON.parse(job.productContext || '{}');
-    response.research = ctx._researchAvailable
-      ? { available: true, length: ctx._researchLength }
-      : { available: false };
-  }
-
-  return c.json(response);
-});
 
 // ---------------------------------------------------------------------------
 // Shared Pipeline Helpers
@@ -354,6 +200,85 @@ async function loadJobInputs(jobId: string): Promise<JobInputs> {
     pipeline: inputs.pipeline || 'standard',
     selectedVoices,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Inline Discovery — runs community source discovery during generation
+// ---------------------------------------------------------------------------
+
+async function runInlineDiscovery(productDocs: string, prompt?: string): Promise<string> {
+  try {
+    // Build a minimal session-like object for extractKeywords
+    const sessionLike = { manualPainPoint: prompt || '' };
+    const keywords = extractKeywords(sessionLike, null, productDocs);
+
+    if (keywords.length === 0) {
+      logger.info('No keywords extracted for inline discovery');
+      return '';
+    }
+
+    logger.info('Running inline discovery', { keywords });
+
+    const sourceConfigs: SourceConfig = {
+      keywords,
+      subreddits: inferSubreddits(keywords),
+      tags: inferStackOverflowTags(keywords),
+      repositories: inferGitHubRepos(keywords),
+      discourseForums: inferDiscourseForums(keywords),
+      maxResults: 10,
+    };
+
+    // Run all sources in parallel, each wrapped in .catch() returning []
+    const [redditPosts, hnPosts, soPosts, ghPosts, discoursePosts] = await Promise.all([
+      discoverFromReddit(sourceConfigs).catch((err) => { logger.warn('Inline Reddit discovery failed', { error: String(err) }); return [] as RawDiscoveredPainPoint[]; }),
+      discoverFromHackerNews(sourceConfigs).catch((err) => { logger.warn('Inline HN discovery failed', { error: String(err) }); return [] as RawDiscoveredPainPoint[]; }),
+      discoverFromStackOverflow(sourceConfigs).catch((err) => { logger.warn('Inline SO discovery failed', { error: String(err) }); return [] as RawDiscoveredPainPoint[]; }),
+      discoverFromGitHub(sourceConfigs).catch((err) => { logger.warn('Inline GitHub discovery failed', { error: String(err) }); return [] as RawDiscoveredPainPoint[]; }),
+      discoverFromDiscourse(sourceConfigs).catch((err) => { logger.warn('Inline Discourse discovery failed', { error: String(err) }); return [] as RawDiscoveredPainPoint[]; }),
+    ]);
+
+    const allPosts = [...redditPosts, ...hnPosts, ...soPosts, ...ghPosts, ...discoursePosts];
+
+    // Also run grounded search for supplemental context
+    let groundedContext = '';
+    try {
+      const groundedResult = await generateWithGeminiGroundedSearch(
+        `Find recent practitioner discussions about: ${keywords.slice(0, 3).join(', ')}. Focus on pain points, frustrations, and unmet needs.`
+      );
+      groundedContext = groundedResult.text;
+    } catch (err) {
+      logger.warn('Inline grounded search failed', { error: String(err) });
+    }
+
+    if (allPosts.length === 0 && !groundedContext) {
+      logger.info('No community posts found during inline discovery');
+      return '';
+    }
+
+    // Sort by engagement, take top 30, format as context string
+    const sorted = [...allPosts].sort((a, b) => engagementScore(b) - engagementScore(a));
+    const topPosts = sorted.slice(0, 30);
+
+    let context = '## Community Discussions\n\n';
+    for (const post of topPosts) {
+      context += `### [${post.sourceType}] ${post.title}\n`;
+      context += `Source: ${post.sourceUrl}\n`;
+      context += `Author: ${post.author}\n`;
+      context += `${post.content.substring(0, 500)}\n\n`;
+    }
+
+    if (groundedContext) {
+      context += `\n## Supplemental Web Research\n${groundedContext.substring(0, 3000)}\n`;
+    }
+
+    logger.info('Inline discovery complete', { posts: allPosts.length, topPosts: topPosts.length });
+    return context;
+  } catch (error) {
+    logger.warn('Inline discovery failed entirely, continuing without it', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return '';
+  }
 }
 
 function updateJobProgress(jobId: string, fields: Record<string, any>) {
@@ -539,7 +464,11 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
   const totalItems = selectedAssetTypes.length * selectedVoices.length;
   let completedItems = 0;
 
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Running competitive research...', progress: 5 });
+  // Step 0: Inline community discovery
+  updateJobProgress(jobId, { status: 'running', currentStep: 'Discovering community pain points...', progress: 2 });
+  const communityContext = await runInlineDiscovery(productDocs, prompt);
+
+  updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 8 });
 
   let researchContext = '';
   try {
@@ -550,10 +479,17 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
     });
   }
 
-  updateJobProgress(jobId, { currentStep: 'Extracting product insights...', progress: 10 });
+  // Merge community context into research context
+  if (communityContext) {
+    researchContext = researchContext
+      ? `${researchContext}\n\n${communityContext}`
+      : communityContext;
+  }
+
+  updateJobProgress(jobId, { currentStep: 'Extracting product insights...', progress: 12 });
   const extractedInsights = await extractInsights(productDocs);
 
-  updateJobProgress(jobId, { currentStep: 'Generating messaging...', progress: 15 });
+  updateJobProgress(jobId, { currentStep: 'Generating messaging...', progress: 18 });
 
   for (const assetType of selectedAssetTypes) {
     const template = loadTemplate(assetType);
@@ -575,7 +511,7 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
       }
 
       completedItems++;
-      updateJobProgress(jobId, { progress: Math.min(Math.round(15 + (completedItems / totalItems) * 80), 95) });
+      updateJobProgress(jobId, { progress: Math.min(Math.round(18 + (completedItems / totalItems) * 77), 95) });
     }
   }
 
@@ -591,10 +527,10 @@ async function runSplitResearchPipeline(jobId: string, inputs: JobInputs): Promi
   const totalItems = selectedAssetTypes.length * selectedVoices.length;
   let completedItems = 0;
 
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Running competitive research & searching for practitioner pain...', progress: 5 });
+  updateJobProgress(jobId, { status: 'running', currentStep: 'Running competitive research, practitioner pain search & community discovery...', progress: 3 });
 
-  // Parallel research streams
-  const [competitiveResult, practitionerResult, extractedInsights] = await Promise.all([
+  // Parallel research streams (including inline discovery)
+  const [competitiveResult, practitionerResult, communityContext, extractedInsights] = await Promise.all([
     runCompetitiveResearch(productDocs, prompt).catch(err => {
       logger.warn('Competitive research failed', { jobId, error: err instanceof Error ? err.message : String(err) });
       return '';
@@ -603,6 +539,7 @@ async function runSplitResearchPipeline(jobId: string, inputs: JobInputs): Promi
       logger.warn('Practitioner pain research failed', { jobId, error: err instanceof Error ? err.message : String(err) });
       return '';
     }),
+    runInlineDiscovery(productDocs, prompt),
     extractInsights(productDocs),
   ]);
 
@@ -612,6 +549,7 @@ async function runSplitResearchPipeline(jobId: string, inputs: JobInputs): Promi
   const enrichedResearch = [
     competitiveResult ? `## Competitive Intelligence\n${competitiveResult}` : '',
     practitionerResult ? `## Practitioner Pain (from communities)\n${practitionerResult}` : '',
+    communityContext || '',
   ].filter(Boolean).join('\n\n');
 
   updateJobProgress(jobId, { currentStep: 'Generating messaging...', progress: 20 });
@@ -640,7 +578,7 @@ async function runSplitResearchPipeline(jobId: string, inputs: JobInputs): Promi
     }
   }
 
-  return finalizeJob(jobId, !!(competitiveResult || practitionerResult), (competitiveResult + practitionerResult).length);
+  return finalizeJob(jobId, !!(competitiveResult || practitionerResult || communityContext), (competitiveResult + practitionerResult + communityContext).length);
 }
 
 // ---------------------------------------------------------------------------
@@ -652,17 +590,25 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
   const totalItems = selectedAssetTypes.length * selectedVoices.length;
   let completedItems = 0;
 
-  // Step 1: Search for practitioner pain
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Searching for practitioner pain...', progress: 5 });
+  // Step 0+1: Search for practitioner pain + inline community discovery in parallel
+  updateJobProgress(jobId, { status: 'running', currentStep: 'Discovering community pain points & searching for practitioner pain...', progress: 3 });
 
-  let practitionerContext = '';
-  try {
-    practitionerContext = await runPractitionerPainResearch(productDocs, prompt);
-  } catch (error) {
-    logger.warn('Practitioner pain research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
+  const [practitionerResult, communityContext, extractedInsights] = await Promise.all([
+    runPractitionerPainResearch(productDocs, prompt).catch(error => {
+      logger.warn('Practitioner pain research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
+      return '';
+    }),
+    runInlineDiscovery(productDocs, prompt),
+    extractInsights(productDocs),
+  ]);
+
+  // Merge community context into practitioner context
+  let practitionerContext = practitionerResult;
+  if (communityContext) {
+    practitionerContext = practitionerContext
+      ? `${practitionerContext}\n\n${communityContext}`
+      : communityContext;
   }
-
-  const extractedInsights = await extractInsights(productDocs);
 
   updateJobProgress(jobId, { currentStep: 'Generating pain-grounded draft...', progress: 15 });
 
@@ -791,8 +737,12 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
   const totalItems = selectedAssetTypes.length * selectedVoices.length;
   let completedItems = 0;
 
-  // Step 1: Research (same as standard)
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Running competitive research...', progress: 5 });
+  // Step 0: Inline community discovery
+  updateJobProgress(jobId, { status: 'running', currentStep: 'Discovering community pain points...', progress: 2 });
+  const communityContext = await runInlineDiscovery(productDocs, prompt);
+
+  // Step 1: Research
+  updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 8 });
 
   let researchContext = '';
   try {
@@ -801,9 +751,16 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
     logger.warn('Competitive research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
   }
 
+  // Merge community context into research context
+  if (communityContext) {
+    researchContext = researchContext
+      ? `${researchContext}\n\n${communityContext}`
+      : communityContext;
+  }
+
   const extractedInsights = await extractInsights(productDocs);
 
-  updateJobProgress(jobId, { currentStep: 'Generating initial drafts...', progress: 15 });
+  updateJobProgress(jobId, { currentStep: 'Generating initial drafts...', progress: 18 });
 
   for (const assetType of selectedAssetTypes) {
     const template = loadTemplate(assetType);
@@ -896,7 +853,7 @@ Output ONLY the rewritten content. No meta-commentary.`;
       }
 
       completedItems++;
-      updateJobProgress(jobId, { progress: Math.min(Math.round(15 + (completedItems / totalItems) * 80), 95) });
+      updateJobProgress(jobId, { progress: Math.min(Math.round(18 + (completedItems / totalItems) * 77), 95) });
     }
   }
 
@@ -912,8 +869,12 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
   const totalItems = selectedAssetTypes.length * selectedVoices.length;
   let completedItems = 0;
 
+  // Step 0: Inline community discovery
+  updateJobProgress(jobId, { status: 'running', currentStep: 'Discovering community pain points...', progress: 2 });
+  const communityContext = await runInlineDiscovery(productDocs, prompt);
+
   // Step 1: Research
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Running competitive research...', progress: 5 });
+  updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 8 });
 
   let researchContext = '';
   try {
@@ -922,9 +883,16 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
     logger.warn('Competitive research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
   }
 
+  // Merge community context into research context
+  if (communityContext) {
+    researchContext = researchContext
+      ? `${researchContext}\n\n${communityContext}`
+      : communityContext;
+  }
+
   const extractedInsights = await extractInsights(productDocs);
 
-  updateJobProgress(jobId, { currentStep: 'Generating from multiple perspectives...', progress: 15 });
+  updateJobProgress(jobId, { currentStep: 'Generating from multiple perspectives...', progress: 18 });
 
   for (const assetType of selectedAssetTypes) {
     const template = loadTemplate(assetType);
@@ -1013,7 +981,7 @@ Output ONLY the synthesized content. No meta-commentary.`;
       }
 
       completedItems++;
-      updateJobProgress(jobId, { progress: Math.min(Math.round(15 + (completedItems / totalItems) * 80), 95) });
+      updateJobProgress(jobId, { progress: Math.min(Math.round(18 + (completedItems / totalItems) * 77), 95) });
     }
   }
 

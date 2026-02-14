@@ -48,46 +48,25 @@ export const api = {
   // Dashboard
   getStats: () => request<any>('/admin/stats'),
 
-  // Priorities
-  getPriorities: () => request<any[]>('/admin/priorities'),
-  createPriority: (data: any) => request<{ id: string }>('/admin/priorities', { method: 'POST', body: JSON.stringify(data) }),
-  updatePriority: (id: string, data: any) => request<any>(`/admin/priorities/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
-  // Discovery
-  getPainPoints: (params?: { status?: string; limit?: number; offset?: number }) => {
-    const query = new URLSearchParams();
-    if (params?.status) query.set('status', params.status);
-    if (params?.limit) query.set('limit', String(params.limit));
-    if (params?.offset) query.set('offset', String(params.offset));
-    return request<any[]>(`/admin/discovery/pain-points?${query}`);
+  uploadFile: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = localStorage.getItem('token');
+    const res = await fetch(`${API_BASE}/upload`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    if (!res.ok) throw new Error('Upload failed');
+    return res.json() as Promise<{ fileId: string; name: string; size: number }>;
   },
-  approvePainPoint: (id: string) => request<any>(`/admin/discovery/pain-points/${id}/approve`, { method: 'POST' }),
-  rejectPainPoint: (id: string, reason: string) =>
-    request<any>(`/admin/discovery/pain-points/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
-  getSchedules: () => request<any[]>('/admin/discovery/schedules'),
-  triggerDiscovery: () => request<any>('/admin/discovery/trigger', { method: 'POST' }),
+  extractText: (fileId: string, name?: string) =>
+    request<{ fileId: string; name: string; text: string; pages: number }>('/extract', {
+      method: 'POST',
+      body: JSON.stringify({ fileId, name }),
+    }),
 
-  // Jobs
-  getJobs: (limit?: number) => request<any[]>(`/admin/jobs?limit=${limit || 50}`),
-  getJob: (id: string) => request<any>(`/admin/jobs/${id}`),
-  queueJob: (painPointId: string, assetTypes?: string[]) =>
-    request<{ jobId: string }>('/admin/jobs/queue', { method: 'POST', body: JSON.stringify({ painPointId, assetTypes }) }),
-  retryJob: (id: string) => request<any>(`/admin/jobs/${id}/retry`, { method: 'POST' }),
-
-  // Messaging
-  getMessagingAssets: (params?: { status?: string; limit?: number }) => {
-    const query = new URLSearchParams();
-    if (params?.status) query.set('status', params.status);
-    if (params?.limit) query.set('limit', String(params.limit));
-    return request<any[]>(`/admin/messaging?${query}`);
-  },
-  getMessagingAsset: (id: string) => request<any>(`/admin/messaging/${id}`),
-  approveAsset: (id: string, data?: { approvedBy?: string; notes?: string }) =>
-    request<any>(`/admin/messaging/${id}/approve`, { method: 'POST', body: JSON.stringify(data || {}) }),
-  rejectAsset: (id: string, notes?: string) =>
-    request<any>(`/admin/messaging/${id}/reject`, { method: 'POST', body: JSON.stringify({ notes }) }),
-  selectVariant: (variantId: string) =>
-    request<any>(`/admin/messaging/variants/${variantId}/select`, { method: 'POST' }),
 
   // Documents
   getDocuments: () => request<any[]>('/admin/documents'),
@@ -101,15 +80,6 @@ export const api = {
   createVoiceProfile: (data: any) => request<{ id: string }>('/admin/voices', { method: 'POST', body: JSON.stringify(data) }),
   updateVoiceProfile: (id: string, data: any) => request<any>(`/admin/voices/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
-  // Personas
-  getPersonas: () => request<any[]>('/admin/personas'),
-  createPersona: (data: any) => request<{ id: string }>('/admin/personas', { method: 'POST', body: JSON.stringify(data) }),
-  updatePersona: (id: string, data: any) => request<any>(`/admin/personas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-
-  // Gaps
-  getGaps: () => request<any[]>('/admin/gaps'),
-  createGap: (data: any) => request<{ id: string }>('/admin/gaps', { method: 'POST', body: JSON.stringify(data) }),
-  updateGap: (id: string, data: any) => request<any>(`/admin/gaps/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
   // Settings
   getSettings: () => request<any[]>('/admin/settings'),

@@ -52,11 +52,6 @@ export const config = {
     jwtExpiresIn: '7d',
   },
 
-  jobs: {
-    discoveryCron: env('DISCOVERY_CRON', '0 */4 * * *'),
-    generationCron: env('GENERATION_CRON', '*/15 * * * *'),
-  },
-
   quality: {
     maxSlopScore: envFloat('MAX_SLOP_SCORE', 0.3),
     maxVendorSpeakScore: envFloat('MAX_VENDOR_SPEAK_SCORE', 0.2),

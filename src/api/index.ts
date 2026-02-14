@@ -10,14 +10,8 @@ import { eq } from 'drizzle-orm';
 import { authenticateUser, createUser } from '../services/auth/users.js';
 
 // Admin route imports
-import prioritiesRoutes from './admin/priorities.js';
-import discoveryRoutes from './admin/discovery.js';
-import jobsRoutes from './admin/jobs.js';
-import messagingRoutes from './admin/messaging.js';
 import documentsRoutes from './admin/documents.js';
 import voicesRoutes from './admin/voices.js';
-import personasRoutes from './admin/personas.js';
-import gapsRoutes from './admin/gaps.js';
 import settingsRoutes from './admin/settings.js';
 
 // Public route imports
@@ -93,14 +87,8 @@ export function createApi() {
   // Admin API routes (protected)
   const admin = new Hono();
   admin.use('*', adminAuth);
-  admin.route('/priorities', prioritiesRoutes);
-  admin.route('/discovery', discoveryRoutes);
-  admin.route('/jobs', jobsRoutes);
-  admin.route('/messaging', messagingRoutes);
   admin.route('/documents', documentsRoutes);
   admin.route('/voices', voicesRoutes);
-  admin.route('/personas', personasRoutes);
-  admin.route('/gaps', gapsRoutes);
   admin.route('/settings', settingsRoutes);
 
   // Dashboard stats

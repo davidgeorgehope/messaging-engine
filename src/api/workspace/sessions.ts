@@ -48,7 +48,7 @@ app.post('/', async (c) => {
 
   try {
     const body = await c.req.json();
-    const { painPointId, manualPainPoint, voiceProfileId, assetTypes, productDocIds, productContext, pipeline } = body;
+    const { painPointId, manualPainPoint, voiceProfileId, voiceProfileIds, assetTypes, productDocIds, productContext, focusInstructions, pipeline } = body;
 
     if (!assetTypes || !Array.isArray(assetTypes) || assetTypes.length === 0) {
       return c.json({ error: 'assetTypes array is required' }, 400);
@@ -58,9 +58,11 @@ app.post('/', async (c) => {
       painPointId,
       manualPainPoint,
       voiceProfileId,
+      voiceProfileIds,
       assetTypes,
       productDocIds,
       productContext,
+      focusInstructions,
       pipeline,
     });
 

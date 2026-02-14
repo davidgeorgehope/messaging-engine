@@ -24,9 +24,11 @@ export interface CreateSessionInput {
   painPointId?: string;
   manualPainPoint?: { title: string; description: string; quotes?: string[] };
   voiceProfileId?: string;
+  voiceProfileIds?: string[];
   assetTypes: string[];
   productDocIds?: string[];
   productContext?: string;
+  focusInstructions?: string;
   pipeline?: string;
 }
 
@@ -69,14 +71,15 @@ export async function createSession(userId: string, data: CreateSessionInput) {
     userId,
     name: 'New Session',
     painPointId,
-    voiceProfileId: data.voiceProfileId || null,
+    voiceProfileId: data.voiceProfileIds?.length ? null : data.voiceProfileId || null,
     assetTypes: JSON.stringify(data.assetTypes),
     status: 'pending',
     manualPainPoint: data.manualPainPoint ? JSON.stringify(data.manualPainPoint) : null,
     productDocIds: data.productDocIds ? JSON.stringify(data.productDocIds) : null,
     productContext: data.productContext || null,
+    focusInstructions: data.focusInstructions || null,
     pipeline: data.pipeline || 'standard',
-    metadata: JSON.stringify({}),
+    metadata: JSON.stringify(data.voiceProfileIds?.length ? { voiceProfileIds: data.voiceProfileIds } : {}),
     isArchived: false,
     createdAt: now,
     updatedAt: now,
@@ -96,9 +99,12 @@ export async function startSessionGeneration(sessionId: string) {
   const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
   if (!session) throw new Error(`Session ${sessionId} not found`);
 
-  // Load voice profile
+  // Load voice profile(s) — single ID in column, or array in metadata
   let voiceProfileIds: string[] = [];
-  if (session.voiceProfileId) {
+  const sessionMeta = JSON.parse(session.metadata || '{}');
+  if (sessionMeta.voiceProfileIds?.length) {
+    voiceProfileIds = sessionMeta.voiceProfileIds;
+  } else if (session.voiceProfileId) {
     voiceProfileIds = [session.voiceProfileId];
   } else {
     const allVoices = await db.query.voiceProfiles.findMany({
@@ -141,13 +147,13 @@ export async function startSessionGeneration(sessionId: string) {
   }
 
   if (!productDocs.trim()) {
-    productDocs = 'No product documentation provided. Generate based on the pain point context above.';
+    productDocs = 'No product documentation provided. Generate based on available context.';
   }
 
   const assetTypes = JSON.parse(session.assetTypes);
   const pipeline = session.pipeline || 'standard';
 
-  // Build prompt from pain point
+  // Build prompt from pain point or focus instructions
   let prompt = 'Generate messaging assets.';
   if (session.painPointId) {
     const painPoint = await db.query.discoveredPainPoints.findFirst({
@@ -156,6 +162,8 @@ export async function startSessionGeneration(sessionId: string) {
     if (painPoint) {
       prompt = `Generate messaging addressing this practitioner pain point: ${painPoint.title}`;
     }
+  } else if (session.focusInstructions) {
+    prompt = session.focusInstructions;
   }
 
   // Create generation job
@@ -411,14 +419,23 @@ async function autoNameSession(sessionId: string, data: CreateSessionInput, pain
     if (pp) painTitle = pp.title;
   } else if (data.manualPainPoint) {
     painTitle = data.manualPainPoint.title;
+  } else if (data.focusInstructions) {
+    painTitle = data.focusInstructions.substring(0, 80);
+  } else if (data.productContext) {
+    painTitle = data.productContext.substring(0, 80);
   }
 
   let voiceName = '';
-  if (data.voiceProfileId) {
-    const v = await db.query.voiceProfiles.findFirst({
-      where: eq(voiceProfiles.id, data.voiceProfileId),
-    });
-    if (v) voiceName = v.name;
+  const voiceIds = data.voiceProfileIds?.length ? data.voiceProfileIds : data.voiceProfileId ? [data.voiceProfileId] : [];
+  if (voiceIds.length > 0) {
+    const voiceNames: string[] = [];
+    for (const vid of voiceIds.slice(0, 3)) {
+      const v = await db.query.voiceProfiles.findFirst({
+        where: eq(voiceProfiles.id, vid),
+      });
+      if (v) voiceNames.push(v.name);
+    }
+    voiceName = voiceNames.join(', ');
   }
 
   const assetTypeLabels = data.assetTypes.map(t => ASSET_TYPE_LABELS[t as AssetType] || t).join(', ');

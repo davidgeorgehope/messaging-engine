@@ -60,29 +60,40 @@ app.post('/:id/chat', async (c) => {
   // Assemble context
   const context = await assembleChatContext(sessionId, assetType);
 
-  // Build Claude messages
-  const claudeMessages = [
-    ...context.messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-    { role: 'user' as const, content: message },
-  ];
+  // Build conversation history for Gemini (system prompt goes in first user turn)
+  const chatHistory = context.messages.map(m => ({
+    role: m.role === 'assistant' ? 'model' as const : 'user' as const,
+    parts: [{ text: m.content }],
+  }));
+
+  // Combine system prompt with user message
+  const userPrompt = context.systemPrompt
+    ? `${context.systemPrompt}\n\n${message}`
+    : message;
 
   return streamSSE(c, async (stream) => {
     try {
-      const Anthropic = (await import('@anthropic-ai/sdk')).default;
-      const client = new Anthropic({ apiKey: config.apiKeys.anthropic });
+      const { GoogleGenAI } = await import('@google/genai');
+      const client = new GoogleGenAI({ apiKey: config.apiKeys.googleAi });
+      const model = config.ai.gemini.proModel;
 
       let fullText = '';
 
-      const response = await client.messages.stream({
-        model: config.ai.claude.model,
-        max_tokens: 4096,
-        system: context.systemPrompt,
-        messages: claudeMessages,
+      const response = await client.models.generateContentStream({
+        model,
+        contents: [
+          ...chatHistory,
+          { role: 'user', parts: [{ text: userPrompt }] },
+        ],
+        config: {
+          maxOutputTokens: 4096,
+          temperature: 0.7,
+        },
       });
 
-      for await (const event of response) {
-        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-          const text = event.delta.text;
+      for await (const chunk of response) {
+        const text = chunk.text ?? '';
+        if (text) {
           fullText += text;
           await stream.writeSSE({
             data: JSON.stringify({ type: 'delta', text }),
@@ -99,7 +110,7 @@ app.post('/:id/chat', async (c) => {
         content: fullText,
         assetType: assetType || null,
         metadata: JSON.stringify({
-          model: config.ai.claude.model,
+          model,
           timestamp: new Date().toISOString(),
         }),
         createdAt: new Date().toISOString(),

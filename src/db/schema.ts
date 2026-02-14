@@ -268,6 +268,7 @@ export const sessions = sqliteTable('sessions', {
   manualPainPoint: text('manual_pain_point'), // JSON: {title, description, quotes?}
   productDocIds: text('product_doc_ids'), // JSON array of product_documents IDs
   productContext: text('product_context'), // pasted/uploaded text if no DB docs
+  focusInstructions: text('focus_instructions'), // optional user focus/instructions
   pipeline: text('pipeline').default('standard'),
   metadata: text('metadata').default('{}'), // JSON for future extensibility
   isArchived: integer('is_archived', { mode: 'boolean' }).notNull().default(false),
