@@ -18,6 +18,8 @@ import {
   runRegenerateAction,
   runVoiceChangeAction,
   runAdversarialLoopAction,
+  runCompetitiveDeepDiveAction,
+  runCommunityCheckAction,
 } from '../../services/workspace/actions.js';
 import { createLogger } from '../../utils/logger.js';
 
@@ -222,6 +224,34 @@ app.post('/:id/actions/adversarial', async (c) => {
   } catch (error) {
     logger.error('Adversarial action failed', { sessionId, error: error instanceof Error ? error.message : String(error) });
     return c.json({ error: error instanceof Error ? error.message : 'Adversarial loop failed' }, 500);
+  }
+});
+
+// POST /sessions/:id/actions/competitive-dive
+app.post('/:id/actions/competitive-dive', async (c) => {
+  const sessionId = c.req.param('id');
+  try {
+    const { assetType } = await c.req.json();
+    if (!assetType) return c.json({ error: 'assetType is required' }, 400);
+    const version = await runCompetitiveDeepDiveAction(sessionId, assetType);
+    return c.json({ version });
+  } catch (error) {
+    logger.error('Competitive dive action failed', { sessionId, error: error instanceof Error ? error.message : String(error) });
+    return c.json({ error: error instanceof Error ? error.message : 'Competitive dive failed' }, 500);
+  }
+});
+
+// POST /sessions/:id/actions/community-check
+app.post('/:id/actions/community-check', async (c) => {
+  const sessionId = c.req.param('id');
+  try {
+    const { assetType } = await c.req.json();
+    if (!assetType) return c.json({ error: 'assetType is required' }, 400);
+    const version = await runCommunityCheckAction(sessionId, assetType);
+    return c.json({ version });
+  } catch (error) {
+    logger.error('Community check action failed', { sessionId, error: error instanceof Error ? error.message : String(error) });
+    return c.json({ error: error instanceof Error ? error.message : 'Community check failed' }, 500);
   }
 });
 

@@ -1,5 +1,5 @@
 // Source types for discovery
-export type SourceType = 'grounded_search' | 'reddit' | 'stackoverflow' | 'hackernews' | 'github' | 'slack';
+export type SourceType = 'grounded_search' | 'reddit' | 'stackoverflow' | 'hackernews' | 'github' | 'slack' | 'discourse';
 
 export interface DiscoverySource {
   type: SourceType;
@@ -13,6 +13,7 @@ export interface SourceConfig {
   repositories?: string[];
   searchQueries?: string[];
   slackChannels?: string[];
+  discourseForums?: Array<{ host: string; name: string }>;
   maxResults?: number;
 }
 

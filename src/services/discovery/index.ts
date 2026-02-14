@@ -11,6 +11,7 @@ import { discoverFromHackerNews } from './sources/hackernews.js';
 import { discoverFromGitHub } from './sources/github.js';
 import { discoverFromGroundedSearch } from './sources/grounded-search.js';
 import { discoverFromSlack } from './sources/slack.js';
+import { discoverFromDiscourse } from './sources/discourse.js';
 import type { SourceType, SourceConfig, RawDiscoveredPainPoint, DiscoveryResult } from './types.js';
 
 const logger = createLogger('discovery');
@@ -23,6 +24,7 @@ const sourceFunctions: Record<SourceType, (config: SourceConfig) => Promise<RawD
   github: discoverFromGitHub,
   grounded_search: discoverFromGroundedSearch,
   slack: discoverFromSlack,
+  discourse: discoverFromDiscourse,
 };
 
 /**

@@ -141,6 +141,10 @@ export const api = {
     request<{ version: any }>(`/workspace/sessions/${sessionId}/actions/change-voice`, { method: 'POST', body: JSON.stringify({ assetType, voiceProfileId }) }),
   runAdversarial: (sessionId: string, assetType: string) =>
     request<{ version: any }>(`/workspace/sessions/${sessionId}/actions/adversarial`, { method: 'POST', body: JSON.stringify({ assetType }) }),
+  runCompetitiveDive: (sessionId: string, assetType: string) =>
+    request<{ version: any }>(`/workspace/sessions/${sessionId}/actions/competitive-dive`, { method: 'POST', body: JSON.stringify({ assetType }) }),
+  runCommunityCheck: (sessionId: string, assetType: string) =>
+    request<{ version: any }>(`/workspace/sessions/${sessionId}/actions/community-check`, { method: 'POST', body: JSON.stringify({ assetType }) }),
 
   // Workspace versions
   getVersions: (sessionId: string, assetType: string) =>

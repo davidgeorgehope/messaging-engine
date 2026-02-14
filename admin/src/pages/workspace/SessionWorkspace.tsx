@@ -202,6 +202,8 @@ export default function SessionWorkspace() {
     setShowVoiceDropdown(false);
     runAction('Voice Change', () => api.runVoiceChange(id!, activeTab, voiceId));
   };
+  const handleCompetitiveDive = () => runAction('Competitive Dive', () => api.runCompetitiveDive(id!, activeTab));
+  const handleCommunityCheck = () => runAction('Community Check', () => api.runCommunityCheck(id!, activeTab));
 
   const handleExportSession = () => {
     if (!session || !results.length) return;
@@ -545,6 +547,22 @@ export default function SessionWorkspace() {
                 {actionRunning === 'Adversarial' ? 'Running...' : 'Adversarial Loop'}
               </button>
               <div className="border-l border-gray-200 h-4 mx-1" />
+              <span className="text-xs text-gray-400 mr-2">Research:</span>
+              <button
+                onClick={handleCompetitiveDive}
+                disabled={!!actionRunning}
+                className="text-xs px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-md transition-colors disabled:opacity-50"
+              >
+                {actionRunning === 'Competitive Dive' ? 'Running...' : 'Competitive Dive'}
+              </button>
+              <button
+                onClick={handleCommunityCheck}
+                disabled={!!actionRunning}
+                className="text-xs px-3 py-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-md transition-colors disabled:opacity-50"
+              >
+                {actionRunning === 'Community Check' ? 'Running...' : 'Community Check'}
+              </button>
+              <div className="border-l border-gray-200 h-4 mx-1" />
               <button
                 onClick={() => setShowChat(!showChat)}
                 className={`text-xs px-3 py-1.5 rounded-md transition-colors ${
@@ -561,7 +579,7 @@ export default function SessionWorkspace() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                   </svg>
-                  Processing...
+                  {actionRunning === 'Competitive Dive' || actionRunning === 'Community Check' ? 'This may take 1-2 minutes...' : 'Processing...'}
                 </span>
               )}
             </div>

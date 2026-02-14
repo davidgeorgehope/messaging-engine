@@ -5,8 +5,17 @@ import { generateId } from '../../utils/hash.js';
 import { createLogger } from '../../utils/logger.js';
 import { analyzeSlop, deslop } from '../../services/quality/slop-detector.js';
 import { scoreContent, checkQualityGates } from '../quality/score-content.js';
+import { generateWithGemini, generateWithGeminiGroundedSearch, createDeepResearchInteraction, pollInteractionUntilComplete } from '../ai/clients.js';
+import { config } from '../../config.js';
+import { discoverFromReddit } from '../discovery/sources/reddit.js';
+import { discoverFromHackerNews } from '../discovery/sources/hackernews.js';
+import { discoverFromStackOverflow } from '../discovery/sources/stackoverflow.js';
+import { discoverFromGitHub } from '../discovery/sources/github.js';
+import { discoverFromDiscourse } from '../discovery/sources/discourse.js';
+import { discoverFromGroundedSearch } from '../discovery/sources/grounded-search.js';
 import type { ScoreResults } from '../quality/score-content.js';
 import type { AssetType } from '../../services/generation/types.js';
+import type { RawDiscoveredPainPoint, SourceConfig } from '../discovery/types.js';
 
 const logger = createLogger('workspace:actions');
 
@@ -94,6 +103,173 @@ async function loadSessionThresholds(sessionId: string) {
   return JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
 }
 
+async function loadSessionProductDocs(session: any): Promise<string> {
+  const db = getDatabase();
+  let productContext = session.productContext || '';
+  const docIds = session.productDocIds ? JSON.parse(session.productDocIds) : [];
+  if (docIds.length > 0) {
+    const { productDocuments } = await import('../../db/schema.js');
+    const docs = await Promise.all(
+      docIds.map((id: string) => db.query.productDocuments.findFirst({ where: eq(productDocuments.id, id) }))
+    );
+    const docsText = docs.filter(Boolean).map((d: any) => `## ${d.name}\n${d.content}`).join('\n\n');
+    productContext = docsText + (productContext ? `\n\n${productContext}` : '');
+  }
+  return productContext;
+}
+
+async function extractKeywordsFromSession(session: any, painPoint: any, productDocs: string): Promise<string[]> {
+  const context = [
+    painPoint?.title || '',
+    painPoint?.content || '',
+    session.manualPainPoint || '',
+    productDocs.substring(0, 2000),
+  ].filter(Boolean).join('\n');
+
+  if (!context.trim()) return [];
+
+  try {
+    const response = await generateWithGemini(
+      `Extract 5-8 specific search keywords from this context that would find relevant practitioner discussions in community forums. Return ONLY a JSON array of strings.\n\nContext:\n${context}`,
+      { temperature: 0.3, maxTokens: 200 }
+    );
+    const match = response.text.match(/\[[\s\S]*?\]/);
+    return match ? JSON.parse(match[0]) : [];
+  } catch {
+    // Fallback: extract words from pain point title
+    const words = (painPoint?.title || session.manualPainPoint || '').split(/\s+/).filter((w: string) => w.length > 3);
+    return words.slice(0, 5);
+  }
+}
+
+function inferSubreddits(keywords: string[]): string[] {
+  const kw = keywords.join(' ').toLowerCase();
+  const subreddits = ['devops', 'sysadmin'];
+  if (/observ|monitor|metric|trace|log|apm/.test(kw)) subreddits.push('observability', 'prometheus');
+  if (/kubernetes|k8s|helm|kubectl/.test(kw)) subreddits.push('kubernetes');
+  if (/docker|container/.test(kw)) subreddits.push('docker');
+  if (/aws|cloud|azure|gcp/.test(kw)) subreddits.push('aws', 'cloudcomputing');
+  if (/security|siem|threat/.test(kw)) subreddits.push('netsec', 'cybersecurity');
+  if (/data|pipeline|etl|warehouse/.test(kw)) subreddits.push('dataengineering');
+  return [...new Set(subreddits)];
+}
+
+function inferStackOverflowTags(keywords: string[]): string[] {
+  const kw = keywords.join(' ').toLowerCase();
+  const tags: string[] = [];
+  if (/observ|monitor|metric/.test(kw)) tags.push('monitoring', 'observability');
+  if (/elastic|elasticsearch|kibana/.test(kw)) tags.push('elasticsearch', 'kibana');
+  if (/grafana|prometheus/.test(kw)) tags.push('grafana', 'prometheus');
+  if (/kubernetes|k8s/.test(kw)) tags.push('kubernetes');
+  if (/docker|container/.test(kw)) tags.push('docker');
+  if (/terraform|ansible/.test(kw)) tags.push('terraform');
+  if (/log|logging/.test(kw)) tags.push('logging');
+  return [...new Set(tags)];
+}
+
+function inferGitHubRepos(keywords: string[]): string[] {
+  const kw = keywords.join(' ').toLowerCase();
+  const repos: string[] = [];
+  if (/elastic|elasticsearch/.test(kw)) repos.push('elastic/elasticsearch');
+  if (/grafana/.test(kw)) repos.push('grafana/grafana');
+  if (/prometheus/.test(kw)) repos.push('prometheus/prometheus');
+  if (/kubernetes|k8s/.test(kw)) repos.push('kubernetes/kubernetes');
+  if (/opentelemetry|otel/.test(kw)) repos.push('open-telemetry/opentelemetry-collector');
+  return repos;
+}
+
+function inferDiscourseForums(keywords: string[]): Array<{ host: string; name: string }> {
+  const kw = keywords.join(' ').toLowerCase();
+  const forums: Array<{ host: string; name: string }> = [
+    { host: 'discuss.elastic.co', name: 'Elastic Discuss' },
+    { host: 'community.grafana.com', name: 'Grafana Community' },
+  ];
+  if (/kubernetes|k8s/.test(kw)) forums.push({ host: 'discuss.kubernetes.io', name: 'Kubernetes Discuss' });
+  if (/docker|container/.test(kw)) forums.push({ host: 'forums.docker.com', name: 'Docker Forums' });
+  if (/hashicorp|terraform|vault|consul/.test(kw)) forums.push({ host: 'discuss.hashicorp.com', name: 'HashiCorp Discuss' });
+  return forums;
+}
+
+function buildCompetitiveResearchPrompt(productDocs: string, currentContent: string, assetType: string): string {
+  return `Research the competitive landscape for the product and messaging context below.
+Focus on:
+- How competitors position themselves against similar pain points
+- Messaging patterns that resonate with practitioners
+- Gaps in competitor messaging that we can exploit
+- Recent market shifts or announcements
+
+## Product Context
+${productDocs.substring(0, 4000)}
+
+## Current ${assetType.replace(/_/g, ' ')} Content
+${currentContent.substring(0, 3000)}
+
+Provide detailed findings with specific examples and source URLs.`;
+}
+
+function buildCompetitiveEnrichmentPrompt(currentContent: string, researchContext: string, assetType: string): string {
+  return `Enrich this ${assetType.replace(/_/g, ' ')} with competitive intelligence.
+
+## Current Content
+${currentContent}
+
+## Competitive Research
+${researchContext.substring(0, 6000)}
+
+Rewrite the content to:
+1. Sharpen competitive differentiation where research reveals gaps
+2. Add specific competitive proof points (without naming competitors directly)
+3. Strengthen claims with market evidence
+4. Keep the same structure and format
+5. Maintain practitioner-first voice — no vendor speak
+
+Output ONLY the enriched content.`;
+}
+
+function buildCommunityContext(posts: RawDiscoveredPainPoint[], groundedContext: string): string {
+  // Sort by engagement metrics
+  const sorted = [...posts].sort((a, b) => {
+    const aScore = (a.metadata.score as number || 0) + (a.metadata.points as number || 0) + (a.metadata.topicViews as number || 0);
+    const bScore = (b.metadata.score as number || 0) + (b.metadata.points as number || 0) + (b.metadata.topicViews as number || 0);
+    return bScore - aScore;
+  });
+
+  const topPosts = sorted.slice(0, 15);
+  let context = '## Community Discussions\n\n';
+
+  for (const post of topPosts) {
+    context += `### [${post.sourceType}] ${post.title}\n`;
+    context += `Source: ${post.sourceUrl}\n`;
+    context += `Author: ${post.author}\n`;
+    context += `${post.content.substring(0, 500)}\n\n`;
+  }
+
+  if (groundedContext) {
+    context += `\n## Supplemental Web Research\n${groundedContext.substring(0, 3000)}\n`;
+  }
+
+  return context;
+}
+
+function buildCommunityRewritePrompt(currentContent: string, communityContext: string, assetType: string): string {
+  return `Rewrite this ${assetType.replace(/_/g, ' ')} using real community evidence.
+
+## Current Content
+${currentContent}
+
+## Community Evidence
+${communityContext.substring(0, 8000)}
+
+Rewrite the content to:
+1. Ground claims in specific community discussions
+2. Use language patterns that match how practitioners actually talk
+3. Reference specific pain points raised in the community
+4. Make the content feel written by someone who's been in the trenches
+5. Keep the same structure and format
+
+Output ONLY the rewritten content.`;
+}
+
 /**
  * Run deslop on the active version of an asset type.
  */
@@ -118,27 +294,13 @@ export async function runDeslopAction(sessionId: string, assetType: string) {
  * Regenerate an asset type from scratch using the existing session context.
  */
 export async function runRegenerateAction(sessionId: string, assetType: string) {
-  // For regenerate, we import and use the generation pipeline
-  const { generateWithClaude, generateWithGemini } = await import('../../services/ai/clients.js');
-  const { config } = await import('../../config.js');
-
   const db = getDatabase();
   const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
   if (!session) throw new Error('Session not found');
 
   logger.info('Running regenerate action', { sessionId, assetType });
 
-  // Reload the session's product context
-  let productContext = session.productContext || '';
-  const docIds = session.productDocIds ? JSON.parse(session.productDocIds) : [];
-  if (docIds.length > 0) {
-    const { productDocuments } = await import('../../db/schema.js');
-    const docs = await Promise.all(
-      docIds.map((id: string) => db.query.productDocuments.findFirst({ where: eq(productDocuments.id, id) }))
-    );
-    const docsText = docs.filter(Boolean).map((d: any) => `## ${d.name}\n${d.content}`).join('\n\n');
-    productContext = docsText + (productContext ? `\n\n${productContext}` : '');
-  }
+  const productContext = await loadSessionProductDocs(session);
 
   const prompt = `Regenerate ${assetType.replace(/_/g, ' ')} content. Focus on practitioner pain, be specific, avoid vendor-speak.\n\n${productContext.substring(0, 8000)}`;
 
@@ -160,9 +322,6 @@ export async function runRegenerateAction(sessionId: string, assetType: string) 
  * Regenerate with a different voice profile.
  */
 export async function runVoiceChangeAction(sessionId: string, assetType: string, newVoiceProfileId: string) {
-  const { generateWithGemini } = await import('../../services/ai/clients.js');
-  const { config } = await import('../../config.js');
-
   const db = getDatabase();
   const active = await getActiveVersion(sessionId, assetType);
   if (!active) throw new Error('No active version');
@@ -194,9 +353,6 @@ export async function runVoiceChangeAction(sessionId: string, assetType: string,
  * Run adversarial loop: score -> gate check -> deslop -> re-score, max 3 iterations.
  */
 export async function runAdversarialLoopAction(sessionId: string, assetType: string) {
-  const { generateWithGemini } = await import('../../services/ai/clients.js');
-  const { config } = await import('../../config.js');
-
   let active = await getActiveVersion(sessionId, assetType);
   if (!active) throw new Error('No active version');
 
@@ -248,5 +404,142 @@ export async function runAdversarialLoopAction(sessionId: string, assetType: str
   return createVersionAndActivate(sessionId, assetType, content, 'adversarial', {
     iterations: iteration,
     finalScores: scores,
+  }, scores, thresholds);
+}
+
+export async function runCompetitiveDeepDiveAction(sessionId: string, assetType: string) {
+  const active = await getActiveVersion(sessionId, assetType);
+  if (!active) throw new Error('No active version for competitive dive');
+
+  const db = getDatabase();
+  const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
+  if (!session) throw new Error('Session not found');
+
+  logger.info('Running competitive deep dive action', { sessionId, assetType });
+
+  const productDocs = await loadSessionProductDocs(session);
+
+  // Build research prompt
+  const researchPrompt = buildCompetitiveResearchPrompt(productDocs, active.content, assetType);
+
+  // Try deep research first, fall back to grounded search
+  let researchContext: string;
+  try {
+    const interactionId = await createDeepResearchInteraction(researchPrompt);
+    const result = await pollInteractionUntilComplete(interactionId);
+    researchContext = result.text;
+    if (result.sources.length > 0) {
+      researchContext += '\n\nSources:\n' + result.sources.map(s => `- ${s.title}: ${s.url}`).join('\n');
+    }
+  } catch (err) {
+    logger.warn('Deep research failed, falling back to grounded search', { error: String(err) });
+    const groundedResult = await generateWithGeminiGroundedSearch(researchPrompt);
+    researchContext = groundedResult.text;
+    if (groundedResult.sources.length > 0) {
+      researchContext += '\n\nSources:\n' + groundedResult.sources.map(s => `- ${s.title}: ${s.url}`).join('\n');
+    }
+  }
+
+  // Enrich with Gemini Pro
+  const enrichmentPrompt = buildCompetitiveEnrichmentPrompt(active.content, researchContext, assetType);
+  const enriched = await generateWithGemini(enrichmentPrompt, {
+    model: config.ai.gemini.proModel,
+    temperature: 0.5,
+    maxTokens: 8000,
+  });
+
+  const scores = await scoreContent(enriched.text);
+  const thresholds = await loadSessionThresholds(sessionId);
+
+  return createVersionAndActivate(sessionId, assetType, enriched.text, 'competitive_dive', {
+    researchLength: researchContext.length,
+    enrichedAt: new Date().toISOString(),
+  }, scores, thresholds);
+}
+
+export async function runCommunityCheckAction(sessionId: string, assetType: string) {
+  const active = await getActiveVersion(sessionId, assetType);
+  if (!active) throw new Error('No active version for community check');
+
+  const db = getDatabase();
+  const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
+  if (!session) throw new Error('Session not found');
+
+  // Load pain point for context
+  let painPoint: any = null;
+  if (session.painPointId) {
+    const { discoveredPainPoints } = await import('../../db/schema.js');
+    painPoint = await db.query.discoveredPainPoints.findFirst({ where: eq(discoveredPainPoints.id, session.painPointId) });
+  }
+
+  logger.info('Running community check action', { sessionId, assetType });
+
+  const productDocs = await loadSessionProductDocs(session);
+  const keywords = await extractKeywordsFromSession(session, painPoint, productDocs);
+
+  if (keywords.length === 0) {
+    throw new Error('Could not extract keywords from session context');
+  }
+
+  logger.info('Extracted keywords for community check', { keywords });
+
+  // Hit 5 discovery sources in parallel
+  const sourceConfigs: SourceConfig = {
+    keywords,
+    subreddits: inferSubreddits(keywords),
+    tags: inferStackOverflowTags(keywords),
+    repositories: inferGitHubRepos(keywords),
+    discourseForums: inferDiscourseForums(keywords),
+    maxResults: 10,
+  };
+
+  const [redditPosts, hnPosts, soPosts, ghPosts, discoursePosts] = await Promise.all([
+    discoverFromReddit(sourceConfigs).catch((err) => { logger.warn('Reddit discovery failed', { error: String(err) }); return []; }),
+    discoverFromHackerNews(sourceConfigs).catch((err) => { logger.warn('HN discovery failed', { error: String(err) }); return []; }),
+    discoverFromStackOverflow(sourceConfigs).catch((err) => { logger.warn('SO discovery failed', { error: String(err) }); return []; }),
+    discoverFromGitHub(sourceConfigs).catch((err) => { logger.warn('GitHub discovery failed', { error: String(err) }); return []; }),
+    discoverFromDiscourse(sourceConfigs).catch((err) => { logger.warn('Discourse discovery failed', { error: String(err) }); return []; }),
+  ]);
+
+  const allPosts = [...redditPosts, ...hnPosts, ...soPosts, ...ghPosts, ...discoursePosts];
+
+  // Also do grounded search for supplemental context
+  let groundedContext = '';
+  try {
+    const groundedResult = await generateWithGeminiGroundedSearch(
+      `Find recent practitioner discussions about: ${keywords.slice(0, 3).join(', ')}. Focus on pain points, frustrations, and unmet needs.`
+    );
+    groundedContext = groundedResult.text;
+  } catch (err) {
+    logger.warn('Grounded search supplement failed', { error: String(err) });
+  }
+
+  if (allPosts.length === 0 && !groundedContext) {
+    throw new Error('No community posts found for the extracted keywords');
+  }
+
+  // Build community context and rewrite
+  const communityContext = buildCommunityContext(allPosts, groundedContext);
+  const rewritePrompt = buildCommunityRewritePrompt(active.content, communityContext, assetType);
+
+  const rewritten = await generateWithGemini(rewritePrompt, {
+    model: config.ai.gemini.proModel,
+    temperature: 0.5,
+    maxTokens: 8000,
+  });
+
+  const scores = await scoreContent(rewritten.text);
+  const thresholds = await loadSessionThresholds(sessionId);
+
+  return createVersionAndActivate(sessionId, assetType, rewritten.text, 'community_check', {
+    sourceCounts: {
+      reddit: redditPosts.length,
+      hackernews: hnPosts.length,
+      stackoverflow: soPosts.length,
+      github: ghPosts.length,
+      discourse: discoursePosts.length,
+    },
+    totalPosts: allPosts.length,
+    keywords,
   }, scores, thresholds);
 }
