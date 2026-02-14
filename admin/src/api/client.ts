@@ -100,6 +100,8 @@ export const api = {
   getSession: (id: string) => request<any>(`/workspace/sessions/${id}`),
   updateSession: (id: string, data: any) =>
     request<{ session: any }>(`/workspace/sessions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteSession: (id: string) =>
+    request<{ deleted: boolean }>(`/workspace/sessions/${id}`, { method: 'DELETE' }),
   getSessionStatus: (id: string) => request<any>(`/workspace/sessions/${id}/status`),
 
   // Workspace actions

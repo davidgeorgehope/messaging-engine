@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api } from '../../api/client';
@@ -53,6 +53,7 @@ function stripMarkdown(md: string): string {
 
 export default function SessionWorkspace() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [session, setSession] = useState<any>(null);
   const [results, setResults] = useState<any[]>([]);
   const [job, setJob] = useState<any>(null);
@@ -205,6 +206,17 @@ export default function SessionWorkspace() {
   const handleCompetitiveDive = () => runAction('Competitive Dive', () => api.runCompetitiveDive(id!, activeTab));
   const handleCommunityCheck = () => runAction('Community Check', () => api.runCommunityCheck(id!, activeTab));
 
+  const handleDelete = async () => {
+    if (!id || !session) return;
+    if (!confirm(`Delete "${session.name}"? This removes all versions and messages. This cannot be undone.`)) return;
+    try {
+      await api.deleteSession(id);
+      navigate('/workspace');
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
   const handleExportSession = () => {
     if (!session || !results.length) return;
     let markdown = `# ${session.name}\n\n`;
@@ -320,17 +332,29 @@ export default function SessionWorkspace() {
             <p className="text-sm text-gray-500 mt-1">Pain point: {painPoint.title}</p>
           )}
         </div>
-        {isCompleted && results.length > 0 && (
+        <div className="flex items-center gap-2">
+          {isCompleted && results.length > 0 && (
+            <button
+              onClick={handleExportSession}
+              className="text-sm px-3 py-1.5 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded border border-gray-300 transition-colors flex items-center gap-1"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Export
+            </button>
+          )}
           <button
-            onClick={handleExportSession}
-            className="text-sm px-3 py-1.5 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded border border-gray-300 transition-colors flex items-center gap-1"
+            onClick={handleDelete}
+            className="text-sm px-3 py-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded border border-gray-300 hover:border-red-200 transition-colors flex items-center gap-1"
+            title="Delete session"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
-            Export
+            Delete
           </button>
-        )}
+        </div>
       </div>
 
       {error && (

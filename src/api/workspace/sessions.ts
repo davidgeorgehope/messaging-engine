@@ -7,6 +7,7 @@ import {
   getSessionStatus,
   listUserSessions,
   updateSession,
+  deleteSession,
 } from '../../services/workspace/sessions.js';
 import {
   getVersions,
@@ -104,6 +105,23 @@ app.put('/:id', async (c) => {
     return c.json({ session });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to update session';
+    const status = message === 'Not authorized' ? 403 : message === 'Session not found' ? 404 : 500;
+    return c.json({ error: message }, status);
+  }
+});
+
+// DELETE /sessions/:id — delete session and all versions/messages
+app.delete('/:id', async (c) => {
+  const user = c.get('user');
+  if (!user?.id) return c.json({ error: 'User ID required' }, 400);
+
+  const sessionId = c.req.param('id');
+
+  try {
+    await deleteSession(sessionId, user.id, user.role);
+    return c.json({ deleted: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to delete session';
     const status = message === 'Not authorized' ? 403 : message === 'Session not found' ? 404 : 500;
     return c.json({ error: message }, status);
   }

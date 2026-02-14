@@ -5,7 +5,7 @@ import { vi } from 'vitest';
 
 vi.mock('../../../src/services/ai/clients.js', () => ({
   generateJSON: vi.fn(),
-  generateWithClaude: vi.fn(),
+  generateWithGemini: vi.fn(),
 }));
 
 vi.mock('../../../src/utils/logger.js', () => ({

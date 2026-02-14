@@ -8,7 +8,7 @@ import { join } from 'path';
 import { PDFParse } from 'pdf-parse';
 
 // AI clients
-import { generateWithClaude } from '../../src/services/ai/clients.js';
+import { generateWithGemini } from '../../src/services/ai/clients.js';
 import { createDeepResearchInteraction, pollInteractionUntilComplete } from '../../src/services/research/deep-research.js';
 
 // Quality scoring
@@ -179,7 +179,7 @@ Be specific and factual, cite sources. Include practitioner quotes from forums.`
         const systemPrompt = buildSystemPrompt(assetType);
         const userPrompt = buildUserPrompt(assetType);
 
-        const response = await generateWithClaude(userPrompt, {
+        const response = await generateWithGemini(userPrompt, {
           systemPrompt,
           temperature: 0.7,
         });

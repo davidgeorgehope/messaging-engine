@@ -26,6 +26,7 @@ import {
   formatInsightsForScoring,
   type ExtractedInsights,
 } from '../services/product/insights.js';
+import { nameSessionFromInsights } from '../services/workspace/sessions.js';
 
 const UPLOADS_DIR = join(process.cwd(), 'data', 'uploads');
 mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -79,7 +80,7 @@ export const ASSET_TYPE_LABELS: Record<AssetType, string> = {
   narrative: 'Narrative',
 };
 
-function loadTemplate(assetType: AssetType): string {
+export function loadTemplate(assetType: AssetType): string {
   try {
     const filename = assetType.replace(/_/g, '-') + '.md';
     return readFileSync(join(TEMPLATE_DIR, filename), 'utf-8');
@@ -515,6 +516,7 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
   // Step 0: Extract insights once — single source of truth for all downstream uses
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(() => {});
   const scoringContext = formatInsightsForScoring(insights);
 
   // Step 1: Community Deep Research + Competitive Research in parallel
@@ -578,6 +580,7 @@ async function runSplitResearchPipeline(jobId: string, inputs: JobInputs): Promi
   // Step 0: Extract insights once — needed before parallel research streams
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(() => {});
   const scoringContext = formatInsightsForScoring(insights);
 
   updateJobProgress(jobId, { currentStep: 'Running community & competitive research...', progress: 5 });
@@ -639,6 +642,7 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
   // Step 0: Extract insights once
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(() => {});
   const scoringContext = formatInsightsForScoring(insights);
 
   // Step 1: Community Deep Research — practitioner pain is the foundation
@@ -778,6 +782,7 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
   // Step 0: Extract insights once
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(() => {});
   const scoringContext = formatInsightsForScoring(insights);
 
   // Step 1: Community Deep Research + Competitive Research in parallel
@@ -911,6 +916,7 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
   // Step 0: Extract insights once
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(() => {});
   const scoringContext = formatInsightsForScoring(insights);
 
   // Step 1: Community Deep Research + Competitive Research in parallel
@@ -1116,7 +1122,7 @@ import type { AIResponse, GenerateOptions } from '../services/ai/types.js';
 
 /** Dispatches generation to the appropriate AI model. Default is Gemini Pro.
  *  Claude is used only when explicitly selected (model contains 'claude'). */
-async function generateContent(
+export async function generateContent(
   prompt: string,
   options: GenerateOptions,
   model?: string,
@@ -1136,7 +1142,7 @@ async function generateContent(
 // Scoring helpers — delegated to shared module (imported at top of file)
 // ---------------------------------------------------------------------------
 
-function buildRefinementPrompt(
+export function buildRefinementPrompt(
   content: string,
   scores: ScoreResults,
   thresholds: any,
@@ -1209,7 +1215,7 @@ ${prompt ? `## Focus Area\n${prompt}\n` : ''}
 // Persona-specific generation angles (Change 3)
 // ---------------------------------------------------------------------------
 
-const PERSONA_ANGLES: Record<string, string> = {
+export const PERSONA_ANGLES: Record<string, string> = {
   'practitioner-community': `You are writing for practitioners — the people who actually do the work.
 Lead with the daily frustration. The reader should think "that's exactly my Tuesday."
 Every claim must pass the test: "Would an SRE share this in Slack?"
@@ -1235,7 +1241,7 @@ Make it scannable — someone scrolling on their phone should get the core messa
 Every section should pass the 30-second attention test: would they keep reading?`,
 };
 
-function buildSystemPrompt(voice: any, assetType: AssetType, evidenceLevel?: EvidenceBundle['evidenceLevel']): string {
+export function buildSystemPrompt(voice: any, assetType: AssetType, evidenceLevel?: EvidenceBundle['evidenceLevel']): string {
   let typeInstructions = '';
 
   if (assetType === 'messaging_template') {
@@ -1290,7 +1296,7 @@ ${typeInstructions}
 ${evidenceLevel === 'product-only' ? `CRITICAL: You have NO community evidence for this generation. Do NOT fabricate practitioner quotes or use phrases like "practitioners say...", "as one engineer noted...", "community sentiment suggests...", "teams report...", or "according to engineers on Reddit...". Write from product documentation only. Where practitioner validation would strengthen a point, write: "[Needs community validation]".` : `You have real community evidence in the prompt. ONLY reference practitioners and quotes from the "Verified Community Evidence" section. Do NOT fabricate additional quotes or community references beyond what is provided. Every practitioner reference must come from that section.`}`;
 }
 
-function buildUserPrompt(
+export function buildUserPrompt(
   existingMessaging: string | undefined,
   prompt: string | undefined,
   researchContext: string,

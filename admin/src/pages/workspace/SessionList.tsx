@@ -57,6 +57,18 @@ export default function SessionList() {
     }
   };
 
+  const handleDelete = async (e: React.MouseEvent, sessionId: string, name: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!confirm(`Delete "${name}"? This removes all versions and messages. This cannot be undone.`)) return;
+    try {
+      await api.deleteSession(sessionId);
+      await loadSessions();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
   const filtered = useMemo(() => {
     return sessions.filter(s => {
       if (statusFilter && s.status !== statusFilter) return false;
@@ -180,17 +192,26 @@ export default function SessionList() {
                   </div>
                 )}
 
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between mt-1">
                   <div className="text-xs text-gray-400">
                     {timeAgo(session.createdAt)}
                   </div>
-                  <button
-                    onClick={(e) => handleArchive(e, session.id, session.isArchived)}
-                    className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
-                    title={session.isArchived ? 'Unarchive' : 'Archive'}
-                  >
-                    {session.isArchived ? 'Unarchive' : 'Archive'}
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={(e) => handleArchive(e, session.id, session.isArchived)}
+                      className="text-xs px-2 py-1 rounded text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+                      title={session.isArchived ? 'Unarchive' : 'Archive'}
+                    >
+                      {session.isArchived ? 'Unarchive' : 'Archive'}
+                    </button>
+                    <button
+                      onClick={(e) => handleDelete(e, session.id, session.name)}
+                      className="text-xs px-2 py-1 rounded text-gray-500 hover:bg-red-50 hover:text-red-600 transition-colors"
+                      title="Delete session"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               </Link>
             );

@@ -2,7 +2,7 @@
 // Pattern detection + AI analysis + deslop function
 // Detects hedging, filler transitions, overused phrases, fake enthusiasm, and cliches
 
-import { generateWithClaude, generateJSON } from '../ai/clients.js';
+import { generateWithGemini, generateJSON } from '../ai/clients.js';
 import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('quality:slop-detector');
@@ -378,7 +378,8 @@ Rules:
 7. Output ONLY the rewritten content, nothing else`;
 
   try {
-    const response = await generateWithClaude(prompt, {
+    const response = await generateWithGemini(prompt, {
+      useProModel: true,
       temperature: 0.3,
       maxTokens: Math.max(content.length * 2, 4000),
     });

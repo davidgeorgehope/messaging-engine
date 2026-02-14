@@ -402,7 +402,8 @@ export async function generateJSON<T = unknown>(
       currentPrompt = `${jsonPrompt}\n\nYour previous response was invalid JSON. Here was the error:\n${lastError}\n\nThe broken response started with:\n${lastResponse.substring(0, 500)}\n\nPlease fix the JSON and return ONLY valid JSON.`;
     }
 
-    const response = await generateWithClaude(currentPrompt, {
+    const response = await generateWithGemini(currentPrompt, {
+      useProModel: true,
       ...options,
       temperature: options.temperature ?? 0.3,
     });

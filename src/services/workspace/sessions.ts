@@ -15,6 +15,7 @@ import { createLogger } from '../../utils/logger.js';
 import { runPublicGenerationJob, ASSET_TYPE_LABELS } from '../../api/generate.js';
 import { PUBLIC_GENERATION_PRIORITY_ID } from '../../db/seed.js';
 import { generateWithGemini } from '../ai/clients.js';
+import type { ExtractedInsights } from '../product/insights.js';
 import { createInitialVersions } from './versions.js';
 import type { AssetType } from '../generation/types.js';
 
@@ -85,7 +86,7 @@ export async function createSession(userId: string, data: CreateSessionInput) {
     updatedAt: now,
   });
 
-  // Auto-name in background
+  // Auto-name from pain point/manual input (pipeline will refine with insights later)
   autoNameSession(sessionId, data, painPointId).catch(err => {
     logger.warn('Auto-naming failed', { sessionId, error: err instanceof Error ? err.message : String(err) });
   });
@@ -387,6 +388,17 @@ export async function listUserSessions(
   return results;
 }
 
+export async function deleteSession(sessionId: string, userId: string, role?: string) {
+  const db = getDatabase();
+
+  const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
+  if (!session) throw new Error('Session not found');
+  if (userId !== 'admin-env' && role !== 'admin' && session.userId !== userId) throw new Error('Not authorized');
+
+  await db.delete(sessions).where(eq(sessions.id, sessionId)).run();
+  logger.info('Session deleted', { sessionId, userId });
+}
+
 export async function updateSession(
   sessionId: string,
   userId: string,
@@ -411,37 +423,52 @@ export async function updateSession(
 async function autoNameSession(sessionId: string, data: CreateSessionInput, painPointId: string | null) {
   const db = getDatabase();
 
-  let painTitle = '';
+  // Quick deterministic placeholder from structured input — no AI call.
+  // The real name gets set by nameSessionFromInsights() once the pipeline
+  // has extracted product insights (summary, domain, category).
+  let name = '';
   if (painPointId) {
     const pp = await db.query.discoveredPainPoints.findFirst({
       where: eq(discoveredPainPoints.id, painPointId),
     });
-    if (pp) painTitle = pp.title;
+    if (pp) name = pp.title.substring(0, 60);
   } else if (data.manualPainPoint) {
-    painTitle = data.manualPainPoint.title;
+    name = data.manualPainPoint.title.substring(0, 60);
   } else if (data.focusInstructions) {
-    painTitle = data.focusInstructions.substring(0, 80);
-  } else if (data.productContext) {
-    painTitle = data.productContext.substring(0, 80);
+    name = data.focusInstructions.substring(0, 60);
   }
 
-  let voiceName = '';
-  const voiceIds = data.voiceProfileIds?.length ? data.voiceProfileIds : data.voiceProfileId ? [data.voiceProfileId] : [];
-  if (voiceIds.length > 0) {
-    const voiceNames: string[] = [];
-    for (const vid of voiceIds.slice(0, 3)) {
-      const v = await db.query.voiceProfiles.findFirst({
-        where: eq(voiceProfiles.id, vid),
-      });
-      if (v) voiceNames.push(v.name);
-    }
-    voiceName = voiceNames.join(', ');
+  if (name) {
+    await db.update(sessions)
+      .set({ name, updatedAt: new Date().toISOString() })
+      .where(eq(sessions.id, sessionId))
+      .run();
+    logger.info('Session placeholder-named', { sessionId, name });
   }
+  // If no structured input available, keep "New Session" — pipeline will rename.
+}
 
-  const assetTypeLabels = data.assetTypes.map(t => ASSET_TYPE_LABELS[t as AssetType] || t).join(', ');
+/**
+ * Rename a session using extracted product insights.
+ * Called by the generation pipeline after extractInsights() completes.
+ * Uses the insights summary to generate a concise session name via Gemini Flash.
+ */
+export async function nameSessionFromInsights(jobId: string, insights: ExtractedInsights, assetTypes: AssetType[]) {
+  const db = getDatabase();
+
+  // Find the session linked to this job
+  const session = await db.query.sessions.findFirst({
+    where: eq(sessions.jobId, jobId),
+  });
+  if (!session) return; // No session (e.g. standalone job) — skip
+
+  const assetTypeLabels = assetTypes.map(t => ASSET_TYPE_LABELS[t] || t).join(', ');
+  const topic = insights.summary || `${insights.domain} ${insights.category}`.trim();
+
+  if (!topic || topic === 'unknown unknown') return; // No useful signal
 
   try {
-    const prompt = `Generate a concise 3-6 word name for a messaging session. Topic: ${painTitle || 'Product messaging'}. Asset types: ${assetTypeLabels}. Voice: ${voiceName || 'default'}. Examples: 'Log Pipeline Cost Battlecard', 'K8s Alert Fatigue Launch Pack'. Return ONLY the name.`;
+    const prompt = `Generate a concise 3-6 word name for a messaging session.\nTopic: ${topic}\nAsset types: ${assetTypeLabels}\nExamples: 'Log Pipeline Cost Battlecard', 'K8s Alert Fatigue Launch Pack', 'Workflow Automation Messaging Suite'\nReturn ONLY the name, no quotes.`;
 
     const result = await generateWithGemini(prompt, {
       temperature: 0.3,
@@ -449,21 +476,18 @@ async function autoNameSession(sessionId: string, data: CreateSessionInput, pain
     });
 
     const name = result.text.trim().replace(/^["']|["']$/g, '');
-    if (name && name.length > 0 && name.length < 100) {
+    if (name && name.length >= 3 && name.length < 100) {
       await db.update(sessions)
         .set({ name, updatedAt: new Date().toISOString() })
-        .where(eq(sessions.id, sessionId))
+        .where(eq(sessions.id, session.id))
         .run();
-      logger.info('Session auto-named', { sessionId, name });
+      logger.info('Session named from insights', { sessionId: session.id, jobId, name });
     }
   } catch (error) {
-    // Fallback: use pain point title or generic name
-    const fallback = painTitle
-      ? `${painTitle.substring(0, 40)} Session`
-      : `Session ${new Date().toLocaleDateString()}`;
-    await db.update(sessions)
-      .set({ name: fallback, updatedAt: new Date().toISOString() })
-      .where(eq(sessions.id, sessionId))
-      .run();
+    // Non-fatal — keep whatever placeholder name exists
+    logger.warn('Failed to name session from insights', {
+      jobId,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }

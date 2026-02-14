@@ -1,10 +1,10 @@
 import { eq, and, desc } from 'drizzle-orm';
 import { getDatabase } from '../../db/index.js';
-import { sessions, sessionVersions, voiceProfiles, productDocuments } from '../../db/schema.js';
+import { sessions, sessionVersions, voiceProfiles, productDocuments, generationJobs } from '../../db/schema.js';
 import { generateId } from '../../utils/hash.js';
 import { createLogger } from '../../utils/logger.js';
 import { analyzeSlop, deslop } from '../../services/quality/slop-detector.js';
-import { scoreContent, checkQualityGates } from '../quality/score-content.js';
+import { scoreContent, checkQualityGates, totalQualityScore } from '../quality/score-content.js';
 import { generateWithGemini, generateWithGeminiGroundedSearch, createDeepResearchInteraction, pollInteractionUntilComplete } from '../ai/clients.js';
 import { config } from '../../config.js';
 import type { ScoreResults } from '../quality/score-content.js';
@@ -17,6 +17,13 @@ import {
   formatInsightsForPrompt,
   formatInsightsForScoring,
 } from '../product/insights.js';
+import {
+  buildSystemPrompt,
+  buildUserPrompt,
+  buildRefinementPrompt,
+  loadTemplate,
+  generateContent,
+} from '../../api/generate.js';
 
 const logger = createLogger('workspace:actions');
 
@@ -192,7 +199,9 @@ export async function runDeslopAction(sessionId: string, assetType: string) {
 }
 
 /**
- * Regenerate an asset type from scratch using the existing session context.
+ * Regenerate an asset type from scratch using the full generation context —
+ * voice profile, template, competitive research, evidence grounding, and
+ * refinement loop — matching the quality of the original generation pipeline.
  */
 export async function runRegenerateAction(sessionId: string, assetType: string) {
   const db = getDatabase();
@@ -201,24 +210,109 @@ export async function runRegenerateAction(sessionId: string, assetType: string) 
 
   logger.info('Running regenerate action', { sessionId, assetType });
 
+  // Load voice profile (same as original generation)
+  const voice = session.voiceProfileId
+    ? await db.query.voiceProfiles.findFirst({ where: eq(voiceProfiles.id, session.voiceProfileId) })
+    : await db.query.voiceProfiles.findFirst({ where: eq(voiceProfiles.isDefault, true) });
+  if (!voice) throw new Error('No voice profile available');
+
+  const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
+
+  // Extract product insights
   const productDocs = await loadSessionProductDocs(session);
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
-  const insightsText = formatInsightsForPrompt(insights);
-
-  const prompt = `Regenerate ${assetType.replace(/_/g, ' ')} content. Focus on practitioner pain, be specific, avoid vendor-speak.\n\n${insightsText}`;
-
-  const response = await generateWithGemini(prompt, {
-    model: config.ai.gemini.proModel,
-    temperature: 0.7,
-    maxTokens: 8000,
-  });
-
   const scoringContext = formatInsightsForScoring(insights);
-  const scores = await scoreContent(response.text, [scoringContext]);
-  const thresholds = await loadSessionThresholds(sessionId);
 
-  return createVersionAndActivate(sessionId, assetType, response.text, 'regenerate', {
+  // Load competitive research from the original generation job (if available)
+  let researchContext = '';
+  if (session.jobId) {
+    const job = await db.query.generationJobs.findFirst({ where: eq(generationJobs.id, session.jobId) });
+    if (job?.competitiveResearch) {
+      try {
+        researchContext = typeof job.competitiveResearch === 'string'
+          ? job.competitiveResearch
+          : JSON.stringify(job.competitiveResearch);
+      } catch { /* ignore parse errors */ }
+    }
+  }
+
+  // Get existing content as reference for the regeneration
+  const active = await getActiveVersion(sessionId, assetType);
+  const existingMessaging = active?.content;
+
+  // Determine evidence level — regeneration uses product-only since we don't re-run
+  // community Deep Research (that's what the community_check action is for)
+  const evidenceLevel: 'strong' | 'partial' | 'product-only' = researchContext ? 'partial' : 'product-only';
+
+  // Load the asset type template
+  const template = loadTemplate(assetType as AssetType);
+
+  // Build full prompts — identical to the original generation pipeline
+  const systemPrompt = buildSystemPrompt(voice, assetType as AssetType, evidenceLevel);
+  const userPrompt = buildUserPrompt(
+    existingMessaging,
+    session.focusInstructions ?? undefined,
+    researchContext,
+    template,
+    assetType as AssetType,
+    insights,
+    evidenceLevel,
+  );
+
+  // Generate with the same model dispatch as the original pipeline
+  const selectedModel = JSON.parse(session.metadata || '{}').model;
+  const response = await generateContent(userPrompt, {
+    systemPrompt,
+    temperature: 0.7,
+  }, selectedModel);
+
+  let finalContent = response.text;
+  let scores = await scoreContent(finalContent, [scoringContext]);
+  let passesGates = checkQualityGates(scores, thresholds);
+
+  // Refinement loop — deslop + refine if quality gates fail (matches original pipeline)
+  if (!passesGates) {
+    logger.info('Regenerated content failed gates, attempting refinement', {
+      sessionId, assetType, slop: scores.slopScore, vendor: scores.vendorSpeakScore,
+      auth: scores.authenticityScore, spec: scores.specificityScore, persona: scores.personaAvgScore,
+    });
+
+    if (scores.slopScore > thresholds.slopMax) {
+      try {
+        finalContent = await deslop(finalContent, scores.slopAnalysis);
+      } catch (deslopErr) {
+        logger.warn('Deslop failed during regeneration, continuing with original', {
+          error: deslopErr instanceof Error ? deslopErr.message : String(deslopErr),
+        });
+      }
+    }
+
+    const refinementPrompt = buildRefinementPrompt(finalContent, scores, thresholds, voice, assetType as AssetType);
+    try {
+      const refinedResponse = await generateContent(refinementPrompt, {
+        systemPrompt,
+        temperature: 0.5,
+      }, selectedModel);
+
+      const refinedScores = await scoreContent(refinedResponse.text, [scoringContext]);
+      if (totalQualityScore(refinedScores) > totalQualityScore(scores)) {
+        finalContent = refinedResponse.text;
+        scores = refinedScores;
+        passesGates = checkQualityGates(scores, thresholds);
+      }
+    } catch (refineErr) {
+      logger.warn('Refinement failed during regeneration, keeping original', {
+        error: refineErr instanceof Error ? refineErr.message : String(refineErr),
+      });
+    }
+  }
+
+  return createVersionAndActivate(sessionId, assetType, finalContent, 'regenerate', {
     regeneratedAt: new Date().toISOString(),
+    voiceProfileId: voice.id,
+    voiceName: voice.name,
+    evidenceLevel,
+    refined: !passesGates ? false : undefined,
   }, scores, thresholds);
 }
 
