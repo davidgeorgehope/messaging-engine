@@ -178,8 +178,8 @@ export async function discoverFromDiscourse(config: SourceConfig): Promise<RawDi
           }
         }
 
-        // Process topics (limit to maxResults per forum/keyword combo)
-        const topicsToProcess = searchData.topics.slice(0, maxResults);
+        // Process topics (cap at 10 per keyword-forum combo to stay under rate limits)
+        const topicsToProcess = searchData.topics.slice(0, Math.min(maxResults, 10));
 
         for (const topic of topicsToProcess) {
           try {
@@ -227,6 +227,12 @@ export async function discoverFromDiscourse(config: SourceConfig): Promise<RawDi
               author = 'unknown';
             }
 
+            // Skip posts with too little content to extract meaningful pain points
+            if (fullContent.length < 50) {
+              logger.debug('Skipping topic with insufficient content', { topicId: topic.id, length: fullContent.length });
+              continue;
+            }
+
             const searchPost = postsByTopic.get(topic.id)?.[0];
 
             posts.push({
@@ -253,10 +259,13 @@ export async function discoverFromDiscourse(config: SourceConfig): Promise<RawDi
               error,
             });
           }
+
+          // Rate limiting between topic fetches — stay under Discourse's 12 req/min
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
 
-        // Rate limiting — Discourse rate limit is ~12 requests/minute
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Rate limiting between keyword-forum combos
+        await new Promise(resolve => setTimeout(resolve, 2000));
       } catch (error) {
         logger.error('Failed to search Discourse forum', { host: forum.host, keyword, error });
       }

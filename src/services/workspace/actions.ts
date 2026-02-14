@@ -1,6 +1,6 @@
 import { eq, and, desc } from 'drizzle-orm';
 import { getDatabase } from '../../db/index.js';
-import { sessions, sessionVersions, voiceProfiles } from '../../db/schema.js';
+import { sessions, sessionVersions, voiceProfiles, productDocuments, discoveredPainPoints } from '../../db/schema.js';
 import { generateId } from '../../utils/hash.js';
 import { createLogger } from '../../utils/logger.js';
 import { analyzeSlop, deslop } from '../../services/quality/slop-detector.js';
@@ -11,7 +11,7 @@ import { discoverFromReddit } from '../discovery/sources/reddit.js';
 import { discoverFromHackerNews } from '../discovery/sources/hackernews.js';
 import { discoverFromStackOverflow } from '../discovery/sources/stackoverflow.js';
 import { discoverFromGitHub } from '../discovery/sources/github.js';
-import { discoverFromDiscourse } from '../discovery/sources/discourse.js';
+import { discoverFromDiscourse, inferDiscourseForums } from '../discovery/sources/discourse.js';
 import { discoverFromGroundedSearch } from '../discovery/sources/grounded-search.js';
 import type { ScoreResults } from '../quality/score-content.js';
 import type { AssetType } from '../../services/generation/types.js';
@@ -108,7 +108,6 @@ async function loadSessionProductDocs(session: any): Promise<string> {
   let productContext = session.productContext || '';
   const docIds = session.productDocIds ? JSON.parse(session.productDocIds) : [];
   if (docIds.length > 0) {
-    const { productDocuments } = await import('../../db/schema.js');
     const docs = await Promise.all(
       docIds.map((id: string) => db.query.productDocuments.findFirst({ where: eq(productDocuments.id, id) }))
     );
@@ -118,43 +117,55 @@ async function loadSessionProductDocs(session: any): Promise<string> {
   return productContext;
 }
 
-async function extractKeywordsFromSession(session: any, painPoint: any, productDocs: string): Promise<string[]> {
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our',
+  'out', 'has', 'have', 'been', 'from', 'this', 'that', 'with', 'they', 'will', 'each', 'make',
+  'how', 'what', 'when', 'where', 'which', 'their', 'than', 'them', 'then', 'into', 'some',
+  'could', 'would', 'should', 'about', 'after', 'there', 'these', 'those', 'being', 'between',
+  'does', 'doing', 'just', 'very', 'also', 'more', 'most', 'much', 'need', 'only', 'want',
+  'using', 'used', 'use', 'like', 'well', 'way', 'get', 'got', 'any', 'its', 'let',
+]);
+
+export function extractKeywords(session: any, painPoint: any, productDocs: string): string[] {
   const context = [
     painPoint?.title || '',
     painPoint?.content || '',
     session.manualPainPoint || '',
     productDocs.substring(0, 2000),
-  ].filter(Boolean).join('\n');
+  ].filter(Boolean).join(' ');
 
   if (!context.trim()) return [];
 
-  try {
-    const response = await generateWithGemini(
-      `Extract 5-8 specific search keywords from this context that would find relevant practitioner discussions in community forums. Return ONLY a JSON array of strings.\n\nContext:\n${context}`,
-      { temperature: 0.3, maxTokens: 200 }
-    );
-    const match = response.text.match(/\[[\s\S]*?\]/);
-    return match ? JSON.parse(match[0]) : [];
-  } catch {
-    // Fallback: extract words from pain point title
-    const words = (painPoint?.title || session.manualPainPoint || '').split(/\s+/).filter((w: string) => w.length > 3);
-    return words.slice(0, 5);
+  const words = context
+    .toLowerCase()
+    .split(/[\s,.;:!?()[\]{}"'`\-_/\\|@#$%^&*+=<>~]+/)
+    .filter(w => w.length > 2 && !STOPWORDS.has(w));
+
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const w of words) {
+    if (!seen.has(w)) {
+      seen.add(w);
+      unique.push(w);
+    }
   }
+
+  return unique.slice(0, 8);
 }
 
-function inferSubreddits(keywords: string[]): string[] {
+export function inferSubreddits(keywords: string[]): string[] {
   const kw = keywords.join(' ').toLowerCase();
-  const subreddits = ['devops', 'sysadmin'];
+  const subreddits = ['devops', 'sre'];
   if (/observ|monitor|metric|trace|log|apm/.test(kw)) subreddits.push('observability', 'prometheus');
   if (/kubernetes|k8s|helm|kubectl/.test(kw)) subreddits.push('kubernetes');
   if (/docker|container/.test(kw)) subreddits.push('docker');
   if (/aws|cloud|azure|gcp/.test(kw)) subreddits.push('aws', 'cloudcomputing');
   if (/security|siem|threat/.test(kw)) subreddits.push('netsec', 'cybersecurity');
   if (/data|pipeline|etl|warehouse/.test(kw)) subreddits.push('dataengineering');
-  return [...new Set(subreddits)];
+  return [...new Set(subreddits)].slice(0, 6);
 }
 
-function inferStackOverflowTags(keywords: string[]): string[] {
+export function inferStackOverflowTags(keywords: string[]): string[] {
   const kw = keywords.join(' ').toLowerCase();
   const tags: string[] = [];
   if (/observ|monitor|metric/.test(kw)) tags.push('monitoring', 'observability');
@@ -164,10 +175,10 @@ function inferStackOverflowTags(keywords: string[]): string[] {
   if (/docker|container/.test(kw)) tags.push('docker');
   if (/terraform|ansible/.test(kw)) tags.push('terraform');
   if (/log|logging/.test(kw)) tags.push('logging');
-  return [...new Set(tags)];
+  return [...new Set(tags)].slice(0, 5);
 }
 
-function inferGitHubRepos(keywords: string[]): string[] {
+export function inferGitHubRepos(keywords: string[]): string[] {
   const kw = keywords.join(' ').toLowerCase();
   const repos: string[] = [];
   if (/elastic|elasticsearch/.test(kw)) repos.push('elastic/elasticsearch');
@@ -175,28 +186,26 @@ function inferGitHubRepos(keywords: string[]): string[] {
   if (/prometheus/.test(kw)) repos.push('prometheus/prometheus');
   if (/kubernetes|k8s/.test(kw)) repos.push('kubernetes/kubernetes');
   if (/opentelemetry|otel/.test(kw)) repos.push('open-telemetry/opentelemetry-collector');
-  return repos;
-}
-
-function inferDiscourseForums(keywords: string[]): Array<{ host: string; name: string }> {
-  const kw = keywords.join(' ').toLowerCase();
-  const forums: Array<{ host: string; name: string }> = [
-    { host: 'discuss.elastic.co', name: 'Elastic Discuss' },
-    { host: 'community.grafana.com', name: 'Grafana Community' },
-  ];
-  if (/kubernetes|k8s/.test(kw)) forums.push({ host: 'discuss.kubernetes.io', name: 'Kubernetes Discuss' });
-  if (/docker|container/.test(kw)) forums.push({ host: 'forums.docker.com', name: 'Docker Forums' });
-  if (/hashicorp|terraform|vault|consul/.test(kw)) forums.push({ host: 'discuss.hashicorp.com', name: 'HashiCorp Discuss' });
-  return forums;
+  return repos.slice(0, 4);
 }
 
 function buildCompetitiveResearchPrompt(productDocs: string, currentContent: string, assetType: string): string {
-  return `Research the competitive landscape for the product and messaging context below.
-Focus on:
-- How competitors position themselves against similar pain points
-- Messaging patterns that resonate with practitioners
-- Gaps in competitor messaging that we can exploit
-- Recent market shifts or announcements
+  return `Analyze the product context below and identify the 3-5 most direct competitors. Then research each competitor in depth.
+
+## Step 1: Identify Competitors
+From the product context, infer the most direct competitors based on the product category, target audience, and capabilities described.
+
+## Step 2: For Each Competitor, Research
+- Specific product limitations (include version numbers where available)
+- Recent pricing or packaging changes (include dates)
+- Migration complaints from practitioners in community forums
+- Claims that contradict our product's positioning
+
+## Step 3: Label Each Finding
+Tag every finding with its evidence type:
+- [official docs] — from vendor documentation or changelogs
+- [community sentiment] — from forums, Reddit, HN, Stack Overflow
+- [analyst coverage] — from analyst reports, reviews, benchmarks
 
 ## Product Context
 ${productDocs.substring(0, 4000)}
@@ -208,17 +217,22 @@ Provide detailed findings with specific examples and source URLs.`;
 }
 
 function buildCompetitiveEnrichmentPrompt(currentContent: string, researchContext: string, assetType: string): string {
+  const internalTypes = ['battlecard', 'talk_track'];
+  const competitorInstruction = internalTypes.includes(assetType)
+    ? 'Name competitors explicitly with specific differentiators'
+    : 'Reference competitive gaps without naming competitors directly';
+
   return `Enrich this ${assetType.replace(/_/g, ' ')} with competitive intelligence.
 
 ## Current Content
-${currentContent}
+${currentContent.substring(0, 8000)}
 
 ## Competitive Research
 ${researchContext.substring(0, 6000)}
 
 Rewrite the content to:
 1. Sharpen competitive differentiation where research reveals gaps
-2. Add specific competitive proof points (without naming competitors directly)
+2. ${competitorInstruction}
 3. Strengthen claims with market evidence
 4. Keep the same structure and format
 5. Maintain practitioner-first voice — no vendor speak
@@ -226,15 +240,29 @@ Rewrite the content to:
 Output ONLY the enriched content.`;
 }
 
-function buildCommunityContext(posts: RawDiscoveredPainPoint[], groundedContext: string): string {
-  // Sort by engagement metrics
-  const sorted = [...posts].sort((a, b) => {
-    const aScore = (a.metadata.score as number || 0) + (a.metadata.points as number || 0) + (a.metadata.topicViews as number || 0);
-    const bScore = (b.metadata.score as number || 0) + (b.metadata.points as number || 0) + (b.metadata.topicViews as number || 0);
-    return bScore - aScore;
-  });
+export function engagementScore(post: RawDiscoveredPainPoint): number {
+  const m = post.metadata;
+  switch (post.sourceType) {
+    case 'reddit':
+      return (m.score as number || 0) + (m.numComments as number || 0) * 2;
+    case 'hackernews':
+      return (m.points as number || 0);
+    case 'github':
+      return (m.reactions as number || 0) * 3;
+    case 'discourse':
+      return (m.topicViews as number || 0) / 20 + (m.topicLikes as number || 0) * 2 + (m.topicReplies as number || 0) * 2 + (m.postLikes as number || 0) * 3;
+    case 'stackoverflow':
+      return (m.score as number || 0) + (m.viewCount as number || 0) / 50;
+    default:
+      return 0;
+  }
+}
 
-  const topPosts = sorted.slice(0, 15);
+function buildCommunityContext(posts: RawDiscoveredPainPoint[], groundedContext: string): string {
+  // Sort by source-normalized engagement score
+  const sorted = [...posts].sort((a, b) => engagementScore(b) - engagementScore(a));
+
+  const topPosts = sorted.slice(0, 30);
   let context = '## Community Discussions\n\n';
 
   for (const post of topPosts) {
@@ -255,7 +283,7 @@ function buildCommunityRewritePrompt(currentContent: string, communityContext: s
   return `Rewrite this ${assetType.replace(/_/g, ' ')} using real community evidence.
 
 ## Current Content
-${currentContent}
+${currentContent.substring(0, 8000)}
 
 ## Community Evidence
 ${communityContext.substring(0, 8000)}
@@ -266,6 +294,7 @@ Rewrite the content to:
 3. Reference specific pain points raised in the community
 4. Make the content feel written by someone who's been in the trenches
 5. Keep the same structure and format
+6. Do not introduce claims that aren't supported by the community evidence provided. Preserve factual accuracy from the original content.
 
 Output ONLY the rewritten content.`;
 }
@@ -468,14 +497,13 @@ export async function runCommunityCheckAction(sessionId: string, assetType: stri
   // Load pain point for context
   let painPoint: any = null;
   if (session.painPointId) {
-    const { discoveredPainPoints } = await import('../../db/schema.js');
     painPoint = await db.query.discoveredPainPoints.findFirst({ where: eq(discoveredPainPoints.id, session.painPointId) });
   }
 
   logger.info('Running community check action', { sessionId, assetType });
 
   const productDocs = await loadSessionProductDocs(session);
-  const keywords = await extractKeywordsFromSession(session, painPoint, productDocs);
+  const keywords = extractKeywords(session, painPoint, productDocs);
 
   if (keywords.length === 0) {
     throw new Error('Could not extract keywords from session context');
@@ -541,5 +569,6 @@ export async function runCommunityCheckAction(sessionId: string, assetType: stri
     },
     totalPosts: allPosts.length,
     keywords,
+    enrichedAt: new Date().toISOString(),
   }, scores, thresholds);
 }
