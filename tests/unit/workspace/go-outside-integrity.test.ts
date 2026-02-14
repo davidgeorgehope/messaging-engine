@@ -1,66 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import {
-  engagementScore,
-} from '../../../src/services/workspace/actions.js';
-import type { RawDiscoveredPainPoint } from '../../../src/services/discovery/types.js';
 
 const ROOT = join(import.meta.dirname, '..', '..', '..');
-
-function makePost(sourceType: string, metadata: Record<string, unknown>): RawDiscoveredPainPoint {
-  return {
-    sourceType: sourceType as any,
-    sourceUrl: 'https://example.com',
-    sourceId: `test-${sourceType}`,
-    title: 'Test post',
-    content: 'Test content',
-    author: 'testuser',
-    metadata,
-    discoveredAt: new Date().toISOString(),
-  };
-}
-
-describe('engagementScore', () => {
-  it('scores Reddit posts using score + numComments * 2', () => {
-    const post = makePost('reddit', { score: 100, numComments: 25 });
-    expect(engagementScore(post)).toBe(150);
-  });
-
-  it('scores HackerNews posts using points', () => {
-    const post = makePost('hackernews', { points: 200 });
-    expect(engagementScore(post)).toBe(200);
-  });
-
-  it('scores GitHub posts using reactions * 3', () => {
-    const post = makePost('github', { reactions: 50 });
-    expect(engagementScore(post)).toBe(150);
-  });
-
-  it('scores Discourse posts with blended metric', () => {
-    const post = makePost('discourse', { topicViews: 3000, topicLikes: 10, topicReplies: 5, postLikes: 3 });
-    // 3000/20 + 10*2 + 5*2 + 3*3 = 150 + 20 + 10 + 9 = 189
-    expect(engagementScore(post)).toBe(189);
-  });
-
-  it('scores StackOverflow posts using score + viewCount / 50', () => {
-    const post = makePost('stackoverflow', { score: 10, viewCount: 5000 });
-    // 10 + 5000/50 = 110
-    expect(engagementScore(post)).toBe(110);
-  });
-
-  it('normalizes across sources (Reddit 150 upvotes ≈ Discourse 3000 views)', () => {
-    const redditPost = makePost('reddit', { score: 150, numComments: 0 });
-    const discoursePost = makePost('discourse', { topicViews: 3000, topicLikes: 0, topicReplies: 0, postLikes: 0 });
-    // Reddit: 150, Discourse: 3000/20 = 150
-    expect(engagementScore(redditPost)).toBe(engagementScore(discoursePost));
-  });
-
-  it('returns 0 for unknown source type', () => {
-    const post = makePost('unknown', { score: 100 });
-    expect(engagementScore(post)).toBe(0);
-  });
-});
 
 describe('go-outside source presence', () => {
   const actionsPath = join(ROOT, 'src/services/workspace/actions.ts');
@@ -76,20 +18,23 @@ describe('go-outside source presence', () => {
     expect(source).toMatch(/export\s+async\s+function\s+runCommunityCheckAction/);
   });
 
-  it('actions.ts exports extractKeywordsAndSources (AI-powered)', () => {
+  it('actions.ts uses Deep Research for community check (not individual adapters)', () => {
     const source = readFileSync(actionsPath, 'utf-8');
-    expect(source).toMatch(/export\s+async\s+function\s+extractKeywordsAndSources/);
+    expect(source).toContain('createDeepResearchInteraction');
+    expect(source).not.toContain('discoverFromReddit');
+    expect(source).not.toContain('discoverFromHackerNews');
+    expect(source).not.toContain('discoverFromStackOverflow');
+    expect(source).not.toContain('discoverFromGitHub');
+    expect(source).not.toContain('discoverFromDiscourse');
   });
 
   it('actions.ts does NOT contain naive regex keyword splitting', () => {
     const source = readFileSync(actionsPath, 'utf-8');
-    // The old naive approach split on regex and filtered stopwords
     expect(source).not.toMatch(/\.split\(\/\[\\s,\./);
   });
 
   it('actions.ts does NOT contain hardcoded inferSubreddits function', () => {
     const source = readFileSync(actionsPath, 'utf-8');
-    // No local function definition for inferSubreddits
     expect(source).not.toMatch(/function\s+inferSubreddits/);
   });
 
@@ -97,14 +42,6 @@ describe('go-outside source presence', () => {
     const source = readFileSync(routesPath, 'utf-8');
     expect(source).toContain('actions/competitive-dive');
     expect(source).toContain('actions/community-check');
-  });
-
-  it('only one inferDiscourseForums exists (imported from discourse.ts)', () => {
-    const source = readFileSync(actionsPath, 'utf-8');
-    // Should import it, not define it locally
-    expect(source).toMatch(/import\s*\{[^}]*inferDiscourseForums[^}]*\}\s*from/);
-    // Should NOT have a local function definition
-    expect(source).not.toMatch(/function\s+inferDiscourseForums/);
   });
 });
 
@@ -116,9 +53,16 @@ describe('evidence grounding in generate.ts', () => {
     expect(source).toContain('interface EvidenceBundle');
   });
 
-  it('runInlineDiscovery returns EvidenceBundle (not string)', () => {
+  it('runCommunityDeepResearch returns EvidenceBundle', () => {
     const source = readFileSync(generatePath, 'utf-8');
-    expect(source).toMatch(/async function runInlineDiscovery.*Promise<EvidenceBundle>/);
+    expect(source).toMatch(/async function runCommunityDeepResearch.*Promise<EvidenceBundle>/);
+  });
+
+  it('generate.ts uses Deep Research for community discovery (not grounded search)', () => {
+    const source = readFileSync(generatePath, 'utf-8');
+    expect(source).toContain('createDeepResearchInteraction');
+    expect(source).not.toContain('generateWithGeminiGroundedSearch');
+    expect(source).not.toContain('extractKeywordsAndSources');
   });
 
   it('storeVariant accepts evidence bundle parameter', () => {
@@ -128,9 +72,7 @@ describe('evidence grounding in generate.ts', () => {
 
   it('storeVariant uses real practitioner quotes from evidence bundle', () => {
     const source = readFileSync(generatePath, 'utf-8');
-    // Should NOT have hardcoded empty quotes
     expect(source).not.toMatch(/practitionerQuotes:\s*JSON\.stringify\(\[\]\)/);
-    // Should use evidence bundle quotes
     expect(source).toMatch(/evidence\?\.practitionerQuotes/);
   });
 
@@ -153,16 +95,13 @@ describe('evidence grounding in generate.ts', () => {
 
   it('default generation model is Gemini (not Claude)', () => {
     const source = readFileSync(generatePath, 'utf-8');
-    // The generateContent function should default to Gemini
     expect(source).toMatch(/Default.*Gemini/i);
     expect(source).toContain("model.includes('claude')");
   });
 
   it('competitive research uses extracted insights, not naive truncation', () => {
     const source = readFileSync(generatePath, 'utf-8');
-    // Should NOT have productDocs.substring(0, 10000)
     expect(source).not.toMatch(/productDocs\.substring\(0,\s*10000\)/);
-    // Should use insights-based research prompt builder
     expect(source).toMatch(/buildResearchPromptFromInsights/);
     expect(source).toMatch(/formatInsightsForResearch/);
   });
@@ -175,6 +114,15 @@ describe('evidence grounding in generate.ts', () => {
   it('writes evidence_level to messaging_assets', () => {
     const source = readFileSync(generatePath, 'utf-8');
     expect(source).toMatch(/evidenceLevel:\s*evidence\?\.evidenceLevel/);
+  });
+
+  it('all pipelines use parallel community + competitive Deep Research', () => {
+    const source = readFileSync(generatePath, 'utf-8');
+    // Standard, adversarial, and multi-perspective should all run community + competitive in parallel
+    const parallelPattern = /Promise\.all\(\[\s*\n?\s*runCommunityDeepResearch/g;
+    const matches = source.match(parallelPattern);
+    // At least 4 pipelines use parallel pattern (standard, split, adversarial, multi-perspective)
+    expect(matches?.length).toBeGreaterThanOrEqual(4);
   });
 });
 
@@ -197,5 +145,19 @@ describe('grounding-validator.ts', () => {
   it('only strips fabrications when evidence level is product-only', () => {
     const source = readFileSync(validatorPath, 'utf-8');
     expect(source).toContain("evidenceLevel !== 'product-only'");
+  });
+});
+
+describe('default pipeline is outside-in', () => {
+  it('schema defaults to outside-in pipeline', () => {
+    const schemaPath = join(ROOT, 'src/db/schema.ts');
+    const source = readFileSync(schemaPath, 'utf-8');
+    expect(source).toContain("pipeline: text('pipeline').default('outside-in')");
+  });
+
+  it('admin UI defaults to outside-in pipeline', () => {
+    const uiPath = join(ROOT, 'admin/src/pages/workspace/NewSession.tsx');
+    const source = readFileSync(uiPath, 'utf-8');
+    expect(source).toContain("useState('outside-in')");
   });
 });

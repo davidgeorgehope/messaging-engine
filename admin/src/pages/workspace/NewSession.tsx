@@ -16,7 +16,7 @@ export default function NewSession() {
   const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([
     'battlecard', 'talk_track', 'launch_messaging', 'social_hook',
   ]);
-  const [pipeline, setPipeline] = useState('standard');
+  const [pipeline, setPipeline] = useState('outside-in');
 
   const [contextMode, setContextMode] = useState<'upload' | 'paste' | 'docs'>('upload');
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);

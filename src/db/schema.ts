@@ -270,7 +270,7 @@ export const sessions = sqliteTable('sessions', {
   productDocIds: text('product_doc_ids'), // JSON array of product_documents IDs
   productContext: text('product_context'), // pasted/uploaded text if no DB docs
   focusInstructions: text('focus_instructions'), // optional user focus/instructions
-  pipeline: text('pipeline').default('standard'),
+  pipeline: text('pipeline').default('outside-in'),
   metadata: text('metadata').default('{}'), // JSON for future extensibility
   isArchived: integer('is_archived', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),

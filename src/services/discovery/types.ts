@@ -1,21 +1,5 @@
 // Source types for discovery
-export type SourceType = 'grounded_search' | 'reddit' | 'stackoverflow' | 'hackernews' | 'github' | 'slack' | 'discourse';
-
-export interface DiscoverySource {
-  type: SourceType;
-  discover: (config: SourceConfig) => Promise<RawDiscoveredPainPoint[]>;
-}
-
-export interface SourceConfig {
-  keywords: string[];
-  subreddits?: string[];
-  tags?: string[];
-  repositories?: string[];
-  searchQueries?: string[];
-  slackChannels?: string[];
-  discourseForums?: Array<{ host: string; name: string }>;
-  maxResults?: number;
-}
+export type SourceType = 'deep_research' | 'grounded_search' | 'reddit' | 'stackoverflow' | 'hackernews' | 'github' | 'slack' | 'discourse';
 
 export interface RawDiscoveredPainPoint {
   sourceType: SourceType;

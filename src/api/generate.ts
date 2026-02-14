@@ -7,7 +7,7 @@ import { voiceProfiles, messagingAssets, assetVariants, assetTraceability, gener
 import { eq } from 'drizzle-orm';
 import { createLogger } from '../utils/logger.js';
 import { generateId } from '../utils/hash.js';
-import { generateWithClaude, generateWithGemini, generateWithGeminiGroundedSearch } from '../services/ai/clients.js';
+import { generateWithClaude, generateWithGemini } from '../services/ai/clients.js';
 import { config } from '../config.js';
 import { createDeepResearchInteraction, pollInteractionUntilComplete } from '../services/research/deep-research.js';
 import { PUBLIC_GENERATION_PRIORITY_ID } from '../db/seed.js';
@@ -16,7 +16,6 @@ import { scoreContent, checkQualityGates as checkGates, totalQualityScore, type 
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import type { AssetType } from '../services/generation/types.js';
-import { extractKeywordsAndSources, type DiscoveryInference } from '../services/workspace/actions.js';
 import { validateGrounding } from '../services/quality/grounding-validator.js';
 import {
   extractInsights,
@@ -238,10 +237,10 @@ async function loadJobInputs(jobId: string): Promise<JobInputs> {
 }
 
 // ---------------------------------------------------------------------------
-// Inline Discovery — runs community source discovery during generation
+// Community Deep Research — replaces inline grounded search + adapter calls
 // ---------------------------------------------------------------------------
 
-async function runInlineDiscovery(insights: ExtractedInsights, prompt?: string): Promise<EvidenceBundle> {
+async function runCommunityDeepResearch(insights: ExtractedInsights, prompt?: string): Promise<EvidenceBundle> {
   const emptyBundle: EvidenceBundle = {
     communityPostCount: 0,
     practitionerQuotes: [],
@@ -250,108 +249,82 @@ async function runInlineDiscovery(insights: ExtractedInsights, prompt?: string):
     sourceCounts: {},
   };
 
-  // Step 1: AI extracts keywords from discovery-level context (domain only, no product framing)
   const discoveryContext = formatInsightsForDiscovery(insights);
-  const sessionLike = { manualPainPoint: prompt || '' };
-  const inference = await extractKeywordsAndSources(sessionLike, null, discoveryContext);
 
-  if (inference.keywords.length === 0) {
-    logger.warn('No keywords extracted for inline discovery');
-    return emptyBundle;
-  }
+  const deepResearchPrompt = `Search Reddit, Hacker News, Stack Overflow, GitHub Issues, developer blogs, and other practitioner communities for real discussions, complaints, and pain points related to this product area.
 
-  logger.info('Running inline discovery via grounded search', { keywords: inference.keywords });
+## Product Area
+${discoveryContext}
 
-  // Step 2: Fire parallel grounded search queries from different angles
-  // Each query targets a different facet — grounded search handles finding
-  // Reddit, HN, SO, Discourse, blogs, etc. on Google's side
-  const queries = [
-    `${inference.keywords.slice(0, 3).join(' ')} site:reddit.com OR site:news.ycombinator.com practitioner pain frustration complaints`,
-    `${inference.keywords.slice(0, 3).join(' ')} site:stackoverflow.com OR site:serverfault.com problems issues workaround`,
-    `${inference.keywords.slice(0, 4).join(', ')} practitioner opinions frustrations community discussions forum`,
-  ];
+${prompt ? `## Focus Area\n${prompt}\n` : ''}
+## What to Find
+1. Real practitioner quotes expressing frustration with current tools in this space
+2. Common complaints and pain points from community discussions
+3. What practitioners wish existed or worked better
+4. Specific scenarios where current solutions fail them
+5. The language practitioners actually use to describe these problems
 
-  const searchResults = await Promise.all(
-    queries.map((query, i) =>
-      generateWithGeminiGroundedSearch(
-        `Search for real practitioner discussions about: ${query}
+## Output Format
+Organize findings as:
+- **Practitioner Quotes**: Verbatim quotes from real community posts (include source URL and community name like "Reddit r/devops" or "HN comment")
+- **Common Pain Points**: Recurring themes across communities
+- **Wished-For Solutions**: What practitioners say they want
+- **Language Patterns**: The specific words and phrases practitioners use (not vendor language)
 
-Find specific community posts where practitioners express frustration, pain, or opinions. For each result:
-- Include the exact source URL
-- Quote practitioners verbatim where possible
-- Note the community (Reddit, HN, SO, etc.)
-- Focus on authentic practitioner voice, not vendor content
+Be specific. Include actual quotes with source URLs.`;
 
-Return detailed findings with source attribution.`,
-        { maxTokens: 4096, temperature: 0.3 },
-      ).catch(err => {
-        logger.warn(`Grounded search query ${i} failed`, { error: String(err) });
-        return null;
-      })
-    )
-  );
+  try {
+    const interactionId = await createDeepResearchInteraction(deepResearchPrompt);
+    const result = await pollInteractionUntilComplete(interactionId);
 
-  // Step 3: Collect results and source URLs
-  const validResults = searchResults.filter(Boolean) as Exclude<typeof searchResults[number], null>[];
-  const allSources = validResults.flatMap(r => r.sources || []);
-  const allText = validResults.map(r => r.text).filter(t => t.length > 50);
+    const practitionerQuotes: PractitionerQuote[] = result.sources.map(s => ({
+      text: s.snippet || s.title,
+      source: (() => { try { return new URL(s.url).hostname.replace('www.', ''); } catch { return 'web'; } })(),
+      sourceUrl: s.url,
+    }));
 
-  if (allText.length === 0) {
-    logger.error('All grounded search queries returned empty', { keywords: inference.keywords });
-    return emptyBundle;
-  }
+    const uniqueHosts = new Set(result.sources.map(s => {
+      try { return new URL(s.url).hostname; } catch { return 'unknown'; }
+    }));
 
-  // Step 4: Build evidence bundle
-  const practitionerQuotes: PractitionerQuote[] = [];
-  for (const source of allSources) {
-    if (source.url && source.title) {
-      practitionerQuotes.push({
-        text: source.snippet || source.title,
-        source: new URL(source.url).hostname.replace('www.', ''),
-        sourceUrl: source.url,
-      });
+    const sourceCounts: Record<string, number> = { deep_research: 1 };
+    for (const host of uniqueHosts) {
+      sourceCounts[host] = (sourceCounts[host] || 0) + 1;
     }
-  }
 
-  const sourceCounts: Record<string, number> = { grounded_search: validResults.length };
-  const uniqueHosts = new Set(allSources.map(s => {
-    try { return new URL(s.url).hostname; } catch { return 'unknown'; }
-  }));
+    const evidenceLevel = classifyEvidenceLevel(
+      result.sources.length,
+      uniqueHosts,
+      result.text.length > 100,
+    );
 
-  // Classify: strong if we got results from multiple queries with real source URLs
-  const evidenceLevel = classifyEvidenceLevel(
-    allSources.length,
-    uniqueHosts,
-    allText.length > 0,
-  );
-
-  let contextText = '## Verified Community Evidence (USE ONLY THESE)\n\n';
-  for (const result of validResults) {
+    let contextText = '## Verified Community Evidence (USE ONLY THESE)\n\n';
     contextText += result.text + '\n\n';
-    if (result.sources?.length) {
+    if (result.sources.length > 0) {
       contextText += 'Sources:\n';
       for (const s of result.sources) {
         contextText += `- [${s.title}](${s.url})\n`;
       }
-      contextText += '\n';
     }
+
+    logger.info('Community Deep Research complete', {
+      sourceUrls: result.sources.length,
+      uniqueHosts: uniqueHosts.size,
+      evidenceLevel,
+      textLength: result.text.length,
+    });
+
+    return {
+      communityPostCount: result.sources.length,
+      practitionerQuotes,
+      communityContextText: contextText,
+      evidenceLevel,
+      sourceCounts,
+    };
+  } catch (error) {
+    logger.error('Community Deep Research failed', { error: error instanceof Error ? error.message : String(error) });
+    return emptyBundle;
   }
-
-  logger.info('Inline discovery via grounded search complete', {
-    queriesRun: queries.length,
-    queriesSucceeded: validResults.length,
-    sourceUrls: allSources.length,
-    uniqueHosts: uniqueHosts.size,
-    evidenceLevel,
-  });
-
-  return {
-    communityPostCount: allSources.length,
-    practitionerQuotes,
-    communityContextText: contextText,
-    evidenceLevel,
-    sourceCounts,
-  };
 }
 
 function updateJobProgress(jobId: string, fields: Record<string, any>) {
@@ -366,38 +339,6 @@ async function runCompetitiveResearch(insights: ExtractedInsights, prompt?: stri
   const researchPrompt = buildResearchPromptFromInsights(insights, prompt);
   const interactionId = await createDeepResearchInteraction(researchPrompt);
   const result = await pollInteractionUntilComplete(interactionId);
-  return result.text;
-}
-
-async function runPractitionerPainResearch(insights: ExtractedInsights, prompt?: string): Promise<string> {
-  const discoveryContext = formatInsightsForDiscovery(insights);
-  const searchPrompt = `Search Reddit, Hacker News, Stack Overflow, and other developer/practitioner communities for real opinions, complaints, and pain points related to the following product area.
-
-## Product Area
-${discoveryContext}
-
-${prompt ? `## Focus Area\n${prompt}\n` : ''}
-
-## What to Find
-1. Real practitioner quotes expressing frustration with current tools in this space
-2. Common complaints and pain points from community discussions
-3. What practitioners wish existed or worked better
-4. Specific scenarios where current solutions fail them
-5. The language practitioners actually use to describe these problems
-
-## Output Format
-Return the findings organized as:
-- **Practitioner Quotes**: Verbatim quotes from real community posts (include source like "Reddit r/devops" or "HN comment")
-- **Common Pain Points**: Recurring themes across communities
-- **Wished-For Solutions**: What practitioners say they want
-- **Language Patterns**: The specific words and phrases practitioners use (not vendor language)
-
-Be specific. Include actual quotes. This will be used to ground messaging in real practitioner language.`;
-
-  const result = await generateWithGeminiGroundedSearch(searchPrompt, {
-    maxTokens: 8192,
-    temperature: 0.3,
-  });
   return result.text;
 }
 
@@ -576,22 +517,20 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   const scoringContext = formatInsightsForScoring(insights);
 
-  // Step 1: Inline community discovery (uses discovery-level context only)
-  updateJobProgress(jobId, { currentStep: 'Discovering community pain points...', progress: 5 });
-  const evidence = await runInlineDiscovery(insights, prompt);
+  // Step 1: Community Deep Research + Competitive Research in parallel
+  updateJobProgress(jobId, { currentStep: 'Running community & competitive research...', progress: 5 });
 
-  updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 8 });
+  const [evidence, competitiveResult] = await Promise.all([
+    runCommunityDeepResearch(insights, prompt),
+    runCompetitiveResearch(insights, prompt).catch(error => {
+      logger.warn('Competitive research failed, continuing without it', {
+        jobId, error: error instanceof Error ? error.message : String(error),
+      });
+      return '';
+    }),
+  ]);
 
-  let researchContext = '';
-  try {
-    researchContext = await runCompetitiveResearch(insights, prompt);
-  } catch (error) {
-    logger.warn('Competitive research failed, continuing without it', {
-      jobId, error: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  // Merge community context into research context
+  let researchContext = competitiveResult;
   if (evidence.communityContextText) {
     researchContext = researchContext
       ? `${researchContext}\n\n${evidence.communityContextText}`
@@ -641,27 +580,21 @@ async function runSplitResearchPipeline(jobId: string, inputs: JobInputs): Promi
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   const scoringContext = formatInsightsForScoring(insights);
 
-  updateJobProgress(jobId, { currentStep: 'Running competitive research, practitioner pain search & community discovery...', progress: 5 });
+  updateJobProgress(jobId, { currentStep: 'Running community & competitive research...', progress: 5 });
 
-  // Parallel research streams (all use insights, not raw docs)
-  const [competitiveResult, practitionerResult, evidence] = await Promise.all([
+  // Parallel research streams: community Deep Research + competitive Deep Research
+  const [evidence, competitiveResult] = await Promise.all([
+    runCommunityDeepResearch(insights, prompt),
     runCompetitiveResearch(insights, prompt).catch(err => {
       logger.warn('Competitive research failed', { jobId, error: err instanceof Error ? err.message : String(err) });
       return '';
     }),
-    runPractitionerPainResearch(insights, prompt).catch(err => {
-      logger.warn('Practitioner pain research failed', { jobId, error: err instanceof Error ? err.message : String(err) });
-      return '';
-    }),
-    runInlineDiscovery(insights, prompt),
   ]);
 
   updateJobProgress(jobId, { currentStep: 'Combining research...', progress: 15 });
 
-  // Build enriched research context with separate sections
   const enrichedResearch = [
     competitiveResult ? `## Competitive Intelligence\n${competitiveResult}` : '',
-    practitionerResult ? `## Practitioner Pain (from communities)\n${practitionerResult}` : '',
     evidence.communityContextText || '',
   ].filter(Boolean).join('\n\n');
 
@@ -691,7 +624,7 @@ async function runSplitResearchPipeline(jobId: string, inputs: JobInputs): Promi
     }
   }
 
-  return finalizeJob(jobId, !!(competitiveResult || practitionerResult || evidence.communityContextText), (competitiveResult + practitionerResult + evidence.communityContextText).length);
+  return finalizeJob(jobId, !!(competitiveResult || evidence.communityContextText), (competitiveResult + evidence.communityContextText).length);
 }
 
 // ---------------------------------------------------------------------------
@@ -708,31 +641,18 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   const scoringContext = formatInsightsForScoring(insights);
 
-  // Step 1: Search for practitioner pain + inline community discovery in parallel
-  updateJobProgress(jobId, { currentStep: 'Discovering community pain points & searching for practitioner pain...', progress: 5 });
-
-  const [practitionerResult, evidence] = await Promise.all([
-    runPractitionerPainResearch(insights, prompt).catch(error => {
-      logger.warn('Practitioner pain research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
-      return '';
-    }),
-    runInlineDiscovery(insights, prompt),
-  ]);
+  // Step 1: Community Deep Research — practitioner pain is the foundation
+  updateJobProgress(jobId, { currentStep: 'Running community Deep Research...', progress: 5 });
+  const evidence = await runCommunityDeepResearch(insights, prompt);
 
   // Outside-in pipeline requires community evidence — it's the whole point
-  if (evidence.evidenceLevel === 'product-only' && !practitionerResult) {
+  if (evidence.evidenceLevel === 'product-only') {
     logger.warn('Outside-in pipeline requires community evidence but none was found. Falling back to standard pipeline.', { jobId });
     updateJobProgress(jobId, { currentStep: 'No community evidence found — falling back to standard pipeline...' });
     return runStandardPipeline(jobId, inputs);
   }
 
-  // Merge community context into practitioner context
-  let practitionerContext = practitionerResult;
-  if (evidence.communityContextText) {
-    practitionerContext = practitionerContext
-      ? `${practitionerContext}\n\n${evidence.communityContextText}`
-      : evidence.communityContextText;
-  }
+  const practitionerContext = evidence.communityContextText;
 
   updateJobProgress(jobId, { currentStep: 'Generating pain-grounded draft...', progress: 15 });
 
@@ -808,7 +728,7 @@ Rewrite with the product specifics and competitive positioning woven in naturall
     }
   }
 
-  return finalizeJob(jobId, !!practitionerContext, practitionerContext.length);
+  return finalizeJob(jobId, !!practitionerContext, practitionerContext?.length ?? 0);
 }
 
 function buildPainFirstPrompt(
@@ -860,21 +780,18 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   const scoringContext = formatInsightsForScoring(insights);
 
-  // Step 1: Inline community discovery
-  updateJobProgress(jobId, { currentStep: 'Discovering community pain points...', progress: 5 });
-  const evidence = await runInlineDiscovery(insights, prompt);
+  // Step 1: Community Deep Research + Competitive Research in parallel
+  updateJobProgress(jobId, { currentStep: 'Running community & competitive research...', progress: 5 });
 
-  // Step 2: Research
-  updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 8 });
+  const [evidence, competitiveResult] = await Promise.all([
+    runCommunityDeepResearch(insights, prompt),
+    runCompetitiveResearch(insights, prompt).catch(error => {
+      logger.warn('Competitive research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
+      return '';
+    }),
+  ]);
 
-  let researchContext = '';
-  try {
-    researchContext = await runCompetitiveResearch(insights, prompt);
-  } catch (error) {
-    logger.warn('Competitive research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
-  }
-
-  // Merge community context into research context
+  let researchContext = competitiveResult;
   if (evidence.communityContextText) {
     researchContext = researchContext
       ? `${researchContext}\n\n${evidence.communityContextText}`
@@ -996,21 +913,18 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   const scoringContext = formatInsightsForScoring(insights);
 
-  // Step 1: Inline community discovery
-  updateJobProgress(jobId, { currentStep: 'Discovering community pain points...', progress: 5 });
-  const evidence = await runInlineDiscovery(insights, prompt);
+  // Step 1: Community Deep Research + Competitive Research in parallel
+  updateJobProgress(jobId, { currentStep: 'Running community & competitive research...', progress: 5 });
 
-  // Step 2: Research
-  updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 8 });
+  const [evidence, competitiveResult] = await Promise.all([
+    runCommunityDeepResearch(insights, prompt),
+    runCompetitiveResearch(insights, prompt).catch(error => {
+      logger.warn('Competitive research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
+      return '';
+    }),
+  ]);
 
-  let researchContext = '';
-  try {
-    researchContext = await runCompetitiveResearch(insights, prompt);
-  } catch (error) {
-    logger.warn('Competitive research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
-  }
-
-  // Merge community context into research context
+  let researchContext = competitiveResult;
   if (evidence.communityContextText) {
     researchContext = researchContext
       ? `${researchContext}\n\n${evidence.communityContextText}`

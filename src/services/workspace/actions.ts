@@ -1,21 +1,14 @@
 import { eq, and, desc } from 'drizzle-orm';
 import { getDatabase } from '../../db/index.js';
-import { sessions, sessionVersions, voiceProfiles, productDocuments, discoveredPainPoints } from '../../db/schema.js';
+import { sessions, sessionVersions, voiceProfiles, productDocuments } from '../../db/schema.js';
 import { generateId } from '../../utils/hash.js';
 import { createLogger } from '../../utils/logger.js';
 import { analyzeSlop, deslop } from '../../services/quality/slop-detector.js';
 import { scoreContent, checkQualityGates } from '../quality/score-content.js';
 import { generateWithGemini, generateWithGeminiGroundedSearch, createDeepResearchInteraction, pollInteractionUntilComplete } from '../ai/clients.js';
 import { config } from '../../config.js';
-import { discoverFromReddit } from '../discovery/sources/reddit.js';
-import { discoverFromHackerNews } from '../discovery/sources/hackernews.js';
-import { discoverFromStackOverflow } from '../discovery/sources/stackoverflow.js';
-import { discoverFromGitHub } from '../discovery/sources/github.js';
-import { discoverFromDiscourse, inferDiscourseForums } from '../discovery/sources/discourse.js';
-import { discoverFromGroundedSearch } from '../discovery/sources/grounded-search.js';
 import type { ScoreResults } from '../quality/score-content.js';
 import type { AssetType } from '../../services/generation/types.js';
-import type { RawDiscoveredPainPoint, SourceConfig } from '../discovery/types.js';
 import {
   extractInsights,
   buildFallbackInsights,
@@ -125,90 +118,6 @@ async function loadSessionProductDocs(session: any): Promise<string> {
   return productContext;
 }
 
-// ---------------------------------------------------------------------------
-// AI-powered keyword extraction + source inference
-// ---------------------------------------------------------------------------
-
-export interface DiscoveryInference {
-  keywords: string[];
-  subreddits: string[];
-  stackOverflowTags: string[];
-  githubRepos: string[];
-  discourseForums: Array<{ host: string; name: string }>;
-}
-
-/**
- * Use Gemini Flash to extract search keywords AND infer relevant community sources
- * in a single LLM call. No naive fallback — if the LLM can't understand the product
- * docs well enough to extract keywords, the pipeline should not proceed with garbage.
- * Grounded search (LLM + Google Search) is the guaranteed safety net downstream.
- *
- * @param productContext Pre-formatted product context (discovery-level or raw docs for workspace actions)
- */
-export async function extractKeywordsAndSources(
-  session: any,
-  painPoint: any,
-  productContext: string,
-): Promise<DiscoveryInference> {
-  const context = [
-    painPoint?.title || '',
-    painPoint?.content || '',
-    session.manualPainPoint || '',
-    productContext,
-  ].filter(Boolean).join('\n\n');
-
-  if (!context.trim()) {
-    throw new Error('No product context provided — cannot extract keywords');
-  }
-
-  const prompt = `Analyze this product/pain context and extract search terms and community sources where practitioners discuss these problems.
-
-## Context
-${context}
-
-Return a JSON object with:
-- "keywords": 5-8 search phrases a practitioner would use when complaining about the problems this product solves. Focus on pain terms (e.g. "alert fatigue", "SOAR sprawl", "too many dashboards"), tool categories, and community jargon. Multi-word phrases are better than single words.
-- "subreddits": 3-6 relevant subreddit names (without r/) where practitioners discuss these topics
-- "stackOverflowTags": 3-5 Stack Overflow tags relevant to this domain
-- "githubRepos": 2-4 GitHub repos (owner/repo format) for major open-source tools in this space that would have relevant issues
-- "discourseForums": 2-4 Discourse forums as objects with "host" (domain) and "name" fields, e.g. {"host": "discuss.kubernetes.io", "name": "Kubernetes Forum"}
-
-IMPORTANT: Return ONLY valid JSON, no markdown code fences or explanation.`;
-
-  const response = await generateWithGemini(prompt, {
-    temperature: 0.3,
-    maxTokens: 2000,
-  });
-
-  let jsonText = response.text.trim();
-  if (jsonText.startsWith('```')) {
-    jsonText = jsonText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
-  }
-
-  const parsed = JSON.parse(jsonText);
-
-  const result: DiscoveryInference = {
-    keywords: Array.isArray(parsed.keywords) ? parsed.keywords.slice(0, 8) : [],
-    subreddits: Array.isArray(parsed.subreddits) ? parsed.subreddits.slice(0, 6) : [],
-    stackOverflowTags: Array.isArray(parsed.stackOverflowTags) ? parsed.stackOverflowTags.slice(0, 5) : [],
-    githubRepos: Array.isArray(parsed.githubRepos) ? parsed.githubRepos.slice(0, 4) : [],
-    discourseForums: Array.isArray(parsed.discourseForums) ? parsed.discourseForums.slice(0, 4) : [],
-  };
-
-  if (result.keywords.length === 0) {
-    throw new Error('AI keyword extraction returned no keywords from the provided context');
-  }
-
-  logger.info('AI keyword/source extraction complete', {
-    keywords: result.keywords,
-    subreddits: result.subreddits,
-    soTags: result.stackOverflowTags,
-    repos: result.githubRepos,
-    forums: result.discourseForums.length,
-  });
-
-  return result;
-}
 
 function buildCompetitiveResearchPrompt(researchContext: string, currentContent: string, assetType: string): string {
   return `Analyze the product context below and identify the 3-5 most direct competitors. Then research each competitor in depth.
@@ -261,64 +170,6 @@ Rewrite the content to:
 Output ONLY the enriched content.`;
 }
 
-export function engagementScore(post: RawDiscoveredPainPoint): number {
-  const m = post.metadata;
-  switch (post.sourceType) {
-    case 'reddit':
-      return (m.score as number || 0) + (m.numComments as number || 0) * 2;
-    case 'hackernews':
-      return (m.points as number || 0);
-    case 'github':
-      return (m.reactions as number || 0) * 3;
-    case 'discourse':
-      return (m.topicViews as number || 0) / 20 + (m.topicLikes as number || 0) * 2 + (m.topicReplies as number || 0) * 2 + (m.postLikes as number || 0) * 3;
-    case 'stackoverflow':
-      return (m.score as number || 0) + (m.viewCount as number || 0) / 50;
-    default:
-      return 0;
-  }
-}
-
-function buildCommunityContext(posts: RawDiscoveredPainPoint[], groundedContext: string): string {
-  // Sort by source-normalized engagement score
-  const sorted = [...posts].sort((a, b) => engagementScore(b) - engagementScore(a));
-
-  const topPosts = sorted.slice(0, 30);
-  let context = '## Community Discussions\n\n';
-
-  for (const post of topPosts) {
-    context += `### [${post.sourceType}] ${post.title}\n`;
-    context += `Source: ${post.sourceUrl}\n`;
-    context += `Author: ${post.author}\n`;
-    context += `${post.content.substring(0, 500)}\n\n`;
-  }
-
-  if (groundedContext) {
-    context += `\n## Supplemental Web Research\n${groundedContext.substring(0, 3000)}\n`;
-  }
-
-  return context;
-}
-
-function buildCommunityRewritePrompt(currentContent: string, communityContext: string, assetType: string): string {
-  return `Rewrite this ${assetType.replace(/_/g, ' ')} using real community evidence.
-
-## Current Content
-${currentContent.substring(0, 8000)}
-
-## Community Evidence
-${communityContext.substring(0, 8000)}
-
-Rewrite the content to:
-1. Ground claims in specific community discussions
-2. Use language patterns that match how practitioners actually talk
-3. Reference specific pain points raised in the community
-4. Make the content feel written by someone who's been in the trenches
-5. Keep the same structure and format
-6. Do not introduce claims that aren't supported by the community evidence provided. Preserve factual accuracy from the original content.
-
-Output ONLY the rewritten content.`;
-}
 
 /**
  * Run deslop on the active version of an asset type.
@@ -520,63 +371,61 @@ export async function runCommunityCheckAction(sessionId: string, assetType: stri
   const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
   if (!session) throw new Error('Session not found');
 
-  // Load pain point for context
-  let painPoint: any = null;
-  if (session.painPointId) {
-    painPoint = await db.query.discoveredPainPoints.findFirst({ where: eq(discoveredPainPoints.id, session.painPointId) });
-  }
-
   logger.info('Running community check action', { sessionId, assetType });
 
   const productDocs = await loadSessionProductDocs(session);
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   const discoveryContext = formatInsightsForDiscovery(insights);
-  const inference = await extractKeywordsAndSources(session, painPoint, discoveryContext);
 
-  if (inference.keywords.length === 0) {
-    throw new Error('Could not extract keywords from session context');
+  // Single Deep Research call replaces all individual source adapters
+  const deepResearchPrompt = `Search Reddit, Hacker News, Stack Overflow, GitHub Issues, developer blogs, and other practitioner communities for real discussions, complaints, and pain points related to this product area.
+
+## Product Area
+${discoveryContext}
+
+## What to Find
+1. Real practitioner quotes expressing frustration with current tools in this space
+2. Common complaints and pain points from community discussions
+3. What practitioners wish existed or worked better
+4. The language practitioners actually use to describe these problems
+
+## Output Format
+Organize findings as:
+- **Practitioner Quotes**: Verbatim quotes from real community posts (include source URL)
+- **Common Pain Points**: Recurring themes across communities
+- **Language Patterns**: The specific words and phrases practitioners use
+
+Be specific. Include actual quotes with source URLs.`;
+
+  const interactionId = await createDeepResearchInteraction(deepResearchPrompt);
+  const result = await pollInteractionUntilComplete(interactionId);
+
+  if (!result.text || result.text.length < 100) {
+    throw new Error('Community Deep Research returned insufficient results');
   }
 
-  logger.info('Extracted keywords for community check', { keywords: inference.keywords });
-
-  // Hit 5 discovery sources in parallel
-  const sourceConfigs: SourceConfig = {
-    keywords: inference.keywords,
-    subreddits: inference.subreddits,
-    tags: inference.stackOverflowTags,
-    repositories: inference.githubRepos,
-    discourseForums: inference.discourseForums.length > 0 ? inference.discourseForums : inferDiscourseForums(inference.keywords),
-    maxResults: 10,
-  };
-
-  const [redditPosts, hnPosts, soPosts, ghPosts, discoursePosts] = await Promise.all([
-    discoverFromReddit(sourceConfigs).catch((err) => { logger.warn('Reddit discovery failed', { error: String(err) }); return []; }),
-    discoverFromHackerNews(sourceConfigs).catch((err) => { logger.warn('HN discovery failed', { error: String(err) }); return []; }),
-    discoverFromStackOverflow(sourceConfigs).catch((err) => { logger.warn('SO discovery failed', { error: String(err) }); return []; }),
-    discoverFromGitHub(sourceConfigs).catch((err) => { logger.warn('GitHub discovery failed', { error: String(err) }); return []; }),
-    discoverFromDiscourse(sourceConfigs).catch((err) => { logger.warn('Discourse discovery failed', { error: String(err) }); return []; }),
-  ]);
-
-  const allPosts = [...redditPosts, ...hnPosts, ...soPosts, ...ghPosts, ...discoursePosts];
-
-  // Also do grounded search for supplemental context
-  let groundedContext = '';
-  try {
-    const groundedResult = await generateWithGeminiGroundedSearch(
-      `Find recent practitioner discussions about: ${inference.keywords.slice(0, 3).join(', ')}. Focus on pain points, frustrations, and unmet needs.`
-    );
-    groundedContext = groundedResult.text;
-  } catch (err) {
-    logger.warn('Grounded search supplement failed', { error: String(err) });
+  let communityContext = '## Community Evidence (from Deep Research)\n\n' + result.text;
+  if (result.sources.length > 0) {
+    communityContext += '\n\nSources:\n' + result.sources.map(s => `- [${s.title}](${s.url})`).join('\n');
   }
 
-  if (allPosts.length === 0 && !groundedContext) {
-    throw new Error('No community posts found for the extracted keywords');
-  }
+  const rewritePrompt = `Rewrite this ${assetType.replace(/_/g, ' ')} using real community evidence.
 
-  // Build community context and rewrite
-  const communityContext = buildCommunityContext(allPosts, groundedContext);
-  const rewritePrompt = buildCommunityRewritePrompt(active.content, communityContext, assetType);
+## Current Content
+${active.content.substring(0, 8000)}
+
+## Community Evidence
+${communityContext.substring(0, 8000)}
+
+Rewrite the content to:
+1. Ground claims in specific community discussions
+2. Use language patterns that match how practitioners actually talk
+3. Reference specific pain points raised in the community
+4. Make the content feel written by someone who's been in the trenches
+5. Keep the same structure and format
+6. Do not introduce claims that aren't supported by the community evidence provided. Preserve factual accuracy from the original content.
+
+Output ONLY the rewritten content.`;
 
   const rewritten = await generateWithGemini(rewritePrompt, {
     model: config.ai.gemini.proModel,
@@ -588,15 +437,7 @@ export async function runCommunityCheckAction(sessionId: string, assetType: stri
   const thresholds = await loadSessionThresholds(sessionId);
 
   return createVersionAndActivate(sessionId, assetType, rewritten.text, 'community_check', {
-    sourceCounts: {
-      reddit: redditPosts.length,
-      hackernews: hnPosts.length,
-      stackoverflow: soPosts.length,
-      github: ghPosts.length,
-      discourse: discoursePosts.length,
-    },
-    totalPosts: allPosts.length,
-    keywords: inference.keywords,
+    sourceCount: result.sources.length,
     enrichedAt: new Date().toISOString(),
   }, scores, thresholds);
 }
