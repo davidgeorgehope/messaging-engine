@@ -16,6 +16,14 @@ import { discoverFromGroundedSearch } from '../discovery/sources/grounded-search
 import type { ScoreResults } from '../quality/score-content.js';
 import type { AssetType } from '../../services/generation/types.js';
 import type { RawDiscoveredPainPoint, SourceConfig } from '../discovery/types.js';
+import {
+  extractInsights,
+  buildFallbackInsights,
+  formatInsightsForDiscovery,
+  formatInsightsForResearch,
+  formatInsightsForPrompt,
+  formatInsightsForScoring,
+} from '../product/insights.js';
 
 const logger = createLogger('workspace:actions');
 
@@ -134,17 +142,19 @@ export interface DiscoveryInference {
  * in a single LLM call. No naive fallback — if the LLM can't understand the product
  * docs well enough to extract keywords, the pipeline should not proceed with garbage.
  * Grounded search (LLM + Google Search) is the guaranteed safety net downstream.
+ *
+ * @param productContext Pre-formatted product context (discovery-level or raw docs for workspace actions)
  */
 export async function extractKeywordsAndSources(
   session: any,
   painPoint: any,
-  productDocs: string,
+  productContext: string,
 ): Promise<DiscoveryInference> {
   const context = [
     painPoint?.title || '',
     painPoint?.content || '',
     session.manualPainPoint || '',
-    productDocs.substring(0, 3000),
+    productContext,
   ].filter(Boolean).join('\n\n');
 
   if (!context.trim()) {
@@ -200,7 +210,7 @@ IMPORTANT: Return ONLY valid JSON, no markdown code fences or explanation.`;
   return result;
 }
 
-function buildCompetitiveResearchPrompt(productDocs: string, currentContent: string, assetType: string): string {
+function buildCompetitiveResearchPrompt(researchContext: string, currentContent: string, assetType: string): string {
   return `Analyze the product context below and identify the 3-5 most direct competitors. Then research each competitor in depth.
 
 ## Step 1: Identify Competitors
@@ -219,7 +229,7 @@ Tag every finding with its evidence type:
 - [analyst coverage] — from analyst reports, reviews, benchmarks
 
 ## Product Context
-${productDocs.substring(0, 4000)}
+${researchContext}
 
 ## Current ${assetType.replace(/_/g, ' ')} Content
 ${currentContent.substring(0, 3000)}
@@ -340,9 +350,11 @@ export async function runRegenerateAction(sessionId: string, assetType: string) 
 
   logger.info('Running regenerate action', { sessionId, assetType });
 
-  const productContext = await loadSessionProductDocs(session);
+  const productDocs = await loadSessionProductDocs(session);
+  const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  const insightsText = formatInsightsForPrompt(insights);
 
-  const prompt = `Regenerate ${assetType.replace(/_/g, ' ')} content. Focus on practitioner pain, be specific, avoid vendor-speak.\n\n${productContext.substring(0, 8000)}`;
+  const prompt = `Regenerate ${assetType.replace(/_/g, ' ')} content. Focus on practitioner pain, be specific, avoid vendor-speak.\n\n${insightsText}`;
 
   const response = await generateWithGemini(prompt, {
     model: config.ai.gemini.proModel,
@@ -350,7 +362,8 @@ export async function runRegenerateAction(sessionId: string, assetType: string) 
     maxTokens: 8000,
   });
 
-  const scores = await scoreContent(response.text);
+  const scoringContext = formatInsightsForScoring(insights);
+  const scores = await scoreContent(response.text, [scoringContext]);
   const thresholds = await loadSessionThresholds(sessionId);
 
   return createVersionAndActivate(sessionId, assetType, response.text, 'regenerate', {
@@ -458,9 +471,11 @@ export async function runCompetitiveDeepDiveAction(sessionId: string, assetType:
   logger.info('Running competitive deep dive action', { sessionId, assetType });
 
   const productDocs = await loadSessionProductDocs(session);
+  const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  const researchInsights = formatInsightsForResearch(insights);
 
   // Build research prompt
-  const researchPrompt = buildCompetitiveResearchPrompt(productDocs, active.content, assetType);
+  const researchPrompt = buildCompetitiveResearchPrompt(researchInsights, active.content, assetType);
 
   // Try deep research first, fall back to grounded search
   let researchContext: string;
@@ -514,7 +529,9 @@ export async function runCommunityCheckAction(sessionId: string, assetType: stri
   logger.info('Running community check action', { sessionId, assetType });
 
   const productDocs = await loadSessionProductDocs(session);
-  const inference = await extractKeywordsAndSources(session, painPoint, productDocs);
+  const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  const discoveryContext = formatInsightsForDiscovery(insights);
+  const inference = await extractKeywordsAndSources(session, painPoint, discoveryContext);
 
   if (inference.keywords.length === 0) {
     throw new Error('Could not extract keywords from session context');

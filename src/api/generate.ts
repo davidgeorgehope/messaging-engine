@@ -18,6 +18,15 @@ import { join } from 'path';
 import type { AssetType } from '../services/generation/types.js';
 import { extractKeywordsAndSources, type DiscoveryInference } from '../services/workspace/actions.js';
 import { validateGrounding } from '../services/quality/grounding-validator.js';
+import {
+  extractInsights,
+  buildFallbackInsights,
+  formatInsightsForDiscovery,
+  formatInsightsForResearch,
+  formatInsightsForPrompt,
+  formatInsightsForScoring,
+  type ExtractedInsights,
+} from '../services/product/insights.js';
 
 const UPLOADS_DIR = join(process.cwd(), 'data', 'uploads');
 mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -232,7 +241,7 @@ async function loadJobInputs(jobId: string): Promise<JobInputs> {
 // Inline Discovery — runs community source discovery during generation
 // ---------------------------------------------------------------------------
 
-async function runInlineDiscovery(productDocs: string, prompt?: string): Promise<EvidenceBundle> {
+async function runInlineDiscovery(insights: ExtractedInsights, prompt?: string): Promise<EvidenceBundle> {
   const emptyBundle: EvidenceBundle = {
     communityPostCount: 0,
     practitionerQuotes: [],
@@ -241,9 +250,10 @@ async function runInlineDiscovery(productDocs: string, prompt?: string): Promise
     sourceCounts: {},
   };
 
-  // Step 1: AI extracts keywords from product docs
+  // Step 1: AI extracts keywords from discovery-level context (domain only, no product framing)
+  const discoveryContext = formatInsightsForDiscovery(insights);
   const sessionLike = { manualPainPoint: prompt || '' };
-  const inference = await extractKeywordsAndSources(sessionLike, null, productDocs);
+  const inference = await extractKeywordsAndSources(sessionLike, null, discoveryContext);
 
   if (inference.keywords.length === 0) {
     logger.warn('No keywords extracted for inline discovery');
@@ -352,18 +362,19 @@ function updateJobProgress(jobId: string, fields: Record<string, any>) {
     .run();
 }
 
-async function runCompetitiveResearch(productDocs: string, prompt?: string): Promise<string> {
-  const researchPrompt = await buildResearchPromptFromDocs(productDocs, prompt);
+async function runCompetitiveResearch(insights: ExtractedInsights, prompt?: string): Promise<string> {
+  const researchPrompt = buildResearchPromptFromInsights(insights, prompt);
   const interactionId = await createDeepResearchInteraction(researchPrompt);
   const result = await pollInteractionUntilComplete(interactionId);
   return result.text;
 }
 
-async function runPractitionerPainResearch(productDocs: string, prompt?: string): Promise<string> {
+async function runPractitionerPainResearch(insights: ExtractedInsights, prompt?: string): Promise<string> {
+  const discoveryContext = formatInsightsForDiscovery(insights);
   const searchPrompt = `Search Reddit, Hacker News, Stack Overflow, and other developer/practitioner communities for real opinions, complaints, and pain points related to the following product area.
 
-## Product Context (brief)
-${productDocs.substring(0, 3000)}
+## Product Area
+${discoveryContext}
 
 ${prompt ? `## Focus Area\n${prompt}\n` : ''}
 
@@ -400,7 +411,7 @@ async function generateAndScoreVariant(
   userPrompt: string,
   systemPrompt: string,
   model: string,
-  productDocs: string,
+  scoringContext: string,
   thresholds: any,
   voice: any,
   assetType: AssetType,
@@ -413,7 +424,7 @@ async function generateAndScoreVariant(
   }, model);
 
   let finalContent = response.text;
-  let scores = await scoreContent(finalContent, [productDocs]);
+  let scores = await scoreContent(finalContent, [scoringContext]);
   let passesGates = checkGates(scores, thresholds);
 
   if (refine && !passesGates) {
@@ -441,7 +452,7 @@ async function generateAndScoreVariant(
         temperature: 0.5,
       }, model);
 
-      const refinedScores = await scoreContent(refinedResponse.text, [productDocs]);
+      const refinedScores = await scoreContent(refinedResponse.text, [scoringContext]);
 
       if (totalQualityScore(refinedScores) > totalQualityScore(scores)) {
         finalContent = refinedResponse.text;
@@ -560,15 +571,20 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
   const totalItems = selectedAssetTypes.length * selectedVoices.length;
   let completedItems = 0;
 
-  // Step 0: Inline community discovery
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Discovering community pain points...', progress: 2 });
-  const evidence = await runInlineDiscovery(productDocs, prompt);
+  // Step 0: Extract insights once — single source of truth for all downstream uses
+  updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
+  const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  const scoringContext = formatInsightsForScoring(insights);
+
+  // Step 1: Inline community discovery (uses discovery-level context only)
+  updateJobProgress(jobId, { currentStep: 'Discovering community pain points...', progress: 5 });
+  const evidence = await runInlineDiscovery(insights, prompt);
 
   updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 8 });
 
   let researchContext = '';
   try {
-    researchContext = await runCompetitiveResearch(productDocs, prompt);
+    researchContext = await runCompetitiveResearch(insights, prompt);
   } catch (error) {
     logger.warn('Competitive research failed, continuing without it', {
       jobId, error: error instanceof Error ? error.message : String(error),
@@ -582,9 +598,6 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
       : evidence.communityContextText;
   }
 
-  updateJobProgress(jobId, { currentStep: 'Extracting product insights...', progress: 12 });
-  const extractedInsights = await extractInsights(productDocs);
-
   updateJobProgress(jobId, { currentStep: 'Generating messaging...', progress: 18 });
 
   for (const assetType of selectedAssetTypes) {
@@ -594,10 +607,10 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
 
       const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
       const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
-      const userPrompt = buildUserPrompt(productDocs, existingMessaging, prompt, researchContext, template, assetType, extractedInsights, evidence.evidenceLevel);
+      const userPrompt = buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel);
 
       try {
-        const result = await generateAndScoreVariant(userPrompt, systemPrompt, selectedModel, productDocs, thresholds, voice, assetType, jobId);
+        const result = await generateAndScoreVariant(userPrompt, systemPrompt, selectedModel, scoringContext, thresholds, voice, assetType, jobId);
         await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence);
       } catch (error) {
         logger.error('Failed to generate variant', {
@@ -623,20 +636,24 @@ async function runSplitResearchPipeline(jobId: string, inputs: JobInputs): Promi
   const totalItems = selectedAssetTypes.length * selectedVoices.length;
   let completedItems = 0;
 
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Running competitive research, practitioner pain search & community discovery...', progress: 3 });
+  // Step 0: Extract insights once — needed before parallel research streams
+  updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
+  const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  const scoringContext = formatInsightsForScoring(insights);
 
-  // Parallel research streams (including inline discovery)
-  const [competitiveResult, practitionerResult, evidence, extractedInsights] = await Promise.all([
-    runCompetitiveResearch(productDocs, prompt).catch(err => {
+  updateJobProgress(jobId, { currentStep: 'Running competitive research, practitioner pain search & community discovery...', progress: 5 });
+
+  // Parallel research streams (all use insights, not raw docs)
+  const [competitiveResult, practitionerResult, evidence] = await Promise.all([
+    runCompetitiveResearch(insights, prompt).catch(err => {
       logger.warn('Competitive research failed', { jobId, error: err instanceof Error ? err.message : String(err) });
       return '';
     }),
-    runPractitionerPainResearch(productDocs, prompt).catch(err => {
+    runPractitionerPainResearch(insights, prompt).catch(err => {
       logger.warn('Practitioner pain research failed', { jobId, error: err instanceof Error ? err.message : String(err) });
       return '';
     }),
-    runInlineDiscovery(productDocs, prompt),
-    extractInsights(productDocs),
+    runInlineDiscovery(insights, prompt),
   ]);
 
   updateJobProgress(jobId, { currentStep: 'Combining research...', progress: 15 });
@@ -657,10 +674,10 @@ async function runSplitResearchPipeline(jobId: string, inputs: JobInputs): Promi
 
       const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
       const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
-      const userPrompt = buildUserPrompt(productDocs, existingMessaging, prompt, enrichedResearch, template, assetType, extractedInsights, evidence.evidenceLevel);
+      const userPrompt = buildUserPrompt(existingMessaging, prompt, enrichedResearch, template, assetType, insights, evidence.evidenceLevel);
 
       try {
-        const result = await generateAndScoreVariant(userPrompt, systemPrompt, selectedModel, productDocs, thresholds, voice, assetType, jobId);
+        const result = await generateAndScoreVariant(userPrompt, systemPrompt, selectedModel, scoringContext, thresholds, voice, assetType, jobId);
         await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence);
       } catch (error) {
         logger.error('Failed to generate variant', {
@@ -686,16 +703,20 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
   const totalItems = selectedAssetTypes.length * selectedVoices.length;
   let completedItems = 0;
 
-  // Step 0+1: Search for practitioner pain + inline community discovery in parallel
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Discovering community pain points & searching for practitioner pain...', progress: 3 });
+  // Step 0: Extract insights once
+  updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
+  const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  const scoringContext = formatInsightsForScoring(insights);
 
-  const [practitionerResult, evidence, extractedInsights] = await Promise.all([
-    runPractitionerPainResearch(productDocs, prompt).catch(error => {
+  // Step 1: Search for practitioner pain + inline community discovery in parallel
+  updateJobProgress(jobId, { currentStep: 'Discovering community pain points & searching for practitioner pain...', progress: 5 });
+
+  const [practitionerResult, evidence] = await Promise.all([
+    runPractitionerPainResearch(insights, prompt).catch(error => {
       logger.warn('Practitioner pain research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
       return '';
     }),
-    runInlineDiscovery(productDocs, prompt),
-    extractInsights(productDocs),
+    runInlineDiscovery(insights, prompt),
   ]);
 
   // Outside-in pipeline requires community evidence — it's the whole point
@@ -725,20 +746,21 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
         // Step 2: Generate pain-grounded first draft (minimal product detail)
         updateJobProgress(jobId, { currentStep: `Generating pain-grounded draft — ${voice.name}` });
 
-        const painFirstPrompt = buildPainFirstPrompt(practitionerContext, productDocs, template, assetType, extractedInsights);
+        const painFirstPrompt = buildPainFirstPrompt(practitionerContext, template, assetType, insights);
         const firstDraft = await generateContent(painFirstPrompt, { systemPrompt, temperature: 0.7 }, selectedModel);
 
         // Step 3: Competitive research + score first draft in parallel
         updateJobProgress(jobId, { currentStep: `Running competitive research & scoring — ${voice.name}` });
 
         const [firstScores, competitiveContext] = await Promise.all([
-          scoreContent(firstDraft.text, [productDocs]),
-          runCompetitiveResearch(productDocs, prompt).catch(() => ''),
+          scoreContent(firstDraft.text, [scoringContext]),
+          runCompetitiveResearch(insights, prompt).catch(() => ''),
         ]);
 
         // Step 4: Refine with full product context + competitive intel
         updateJobProgress(jobId, { currentStep: `Refining with product context — ${voice.name}` });
 
+        const productInsightsText = formatInsightsForPrompt(insights);
         const refinePrompt = `Refine this ${assetType.replace(/_/g, ' ')} by layering in product specifics and competitive context.
 
 ## CRITICAL RULE: Don't lose the practitioner voice
@@ -747,8 +769,8 @@ The first draft below was written from pure practitioner pain. It sounds authent
 ## First Draft (pain-grounded)
 ${firstDraft.text}
 
-## Product Documentation (add specifics from here)
-${productDocs.substring(0, 6000)}
+## Product Intelligence (add specifics from here)
+${productInsightsText}
 
 ${competitiveContext ? `## Competitive Intelligence (weave in positioning)\n${competitiveContext.substring(0, 4000)}` : ''}
 
@@ -758,7 +780,7 @@ ${template}
 Rewrite with the product specifics and competitive positioning woven in naturally. Keep the pain-first structure. Output ONLY the refined content.`;
 
         const refinedResponse = await generateContent(refinePrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
-        const refinedScores = await scoreContent(refinedResponse.text, [productDocs]);
+        const refinedScores = await scoreContent(refinedResponse.text, [scoringContext]);
 
         // Keep best version
         const firstResult: GenerateAndScoreResult = {
@@ -791,10 +813,9 @@ Rewrite with the product specifics and competitive positioning woven in naturall
 
 function buildPainFirstPrompt(
   practitionerContext: string,
-  productDocs: string,
   template: string,
   assetType: AssetType,
-  insights?: ExtractedInsights | null,
+  insights: ExtractedInsights,
 ): string {
   let prompt = '';
 
@@ -806,18 +827,12 @@ ${practitionerContext}
   }
 
   // Only include minimal product context — enough to know what we're writing about, not enough to tempt vendor-speak
-  if (insights) {
-    prompt += `## What the product does (brief — DO NOT lead with this)
+  prompt += `## What the product does (brief — DO NOT lead with this)
 ${insights.summary}
 
 ## Pain points it addresses
 ${insights.painPointsAddressed.map(p => `- ${p}`).join('\n')}
 `;
-  } else {
-    prompt += `## Product context (brief — DO NOT lead with this)
-${productDocs.substring(0, 1500)}
-`;
-  }
 
   prompt += `
 ## Template / Format Guide
@@ -840,16 +855,21 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
   const totalItems = selectedAssetTypes.length * selectedVoices.length;
   let completedItems = 0;
 
-  // Step 0: Inline community discovery
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Discovering community pain points...', progress: 2 });
-  const evidence = await runInlineDiscovery(productDocs, prompt);
+  // Step 0: Extract insights once
+  updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
+  const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  const scoringContext = formatInsightsForScoring(insights);
 
-  // Step 1: Research
+  // Step 1: Inline community discovery
+  updateJobProgress(jobId, { currentStep: 'Discovering community pain points...', progress: 5 });
+  const evidence = await runInlineDiscovery(insights, prompt);
+
+  // Step 2: Research
   updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 8 });
 
   let researchContext = '';
   try {
-    researchContext = await runCompetitiveResearch(productDocs, prompt);
+    researchContext = await runCompetitiveResearch(insights, prompt);
   } catch (error) {
     logger.warn('Competitive research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
   }
@@ -861,8 +881,6 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
       : evidence.communityContextText;
   }
 
-  const extractedInsights = await extractInsights(productDocs);
-
   updateJobProgress(jobId, { currentStep: 'Generating initial drafts...', progress: 18 });
 
   for (const assetType of selectedAssetTypes) {
@@ -870,13 +888,13 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
     for (const voice of selectedVoices) {
       const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
       const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
-      const userPrompt = buildUserPrompt(productDocs, existingMessaging, prompt, researchContext, template, assetType, extractedInsights, evidence.evidenceLevel);
+      const userPrompt = buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel);
 
       try {
         // Step 2: Generate initial draft
         updateJobProgress(jobId, { currentStep: `Generating initial draft — ${voice.name}` });
         const initialResponse = await generateContent(userPrompt, { systemPrompt, temperature: 0.7 }, selectedModel);
-        const initialScores = await scoreContent(initialResponse.text, [productDocs]);
+        const initialScores = await scoreContent(initialResponse.text, [scoringContext]);
 
         // Step 3: Attack — hostile skeptical practitioner tears it apart
         updateJobProgress(jobId, { currentStep: `Running adversarial critique — ${voice.name}` });
@@ -907,6 +925,7 @@ Be brutal. Every weakness you find makes the final output stronger. Format as a 
         // Step 4: Defend — rewrite to survive the attacks
         updateJobProgress(jobId, { currentStep: `Rewriting to survive objections — ${voice.name}` });
 
+        const productInsightsText = formatInsightsForPrompt(insights);
         const defendPrompt = `Your ${assetType.replace(/_/g, ' ')} messaging was attacked by a skeptical practitioner. Rewrite it to survive every objection.
 
 ## Original Messaging
@@ -915,11 +934,11 @@ ${initialResponse.text}
 ## Practitioner Attacks
 ${attackResponse.text}
 
-## Product Documentation (for evidence)
-${productDocs.substring(0, 6000)}
+## Product Intelligence (for evidence)
+${productInsightsText}
 
 ## Rules for the Rewrite
-1. For every unsubstantiated claim: either add specific evidence from the product docs, or remove the claim entirely
+1. For every unsubstantiated claim: either add specific evidence from the product intelligence, or remove the claim entirely
 2. For every vendor-speak phrase: replace with practitioner language
 3. For every vague promise: make it concrete with specifics, or cut it
 4. Address the strongest objections directly — don't dodge them
@@ -932,7 +951,7 @@ ${template}
 Output ONLY the rewritten content. No meta-commentary.`;
 
         const defendedResponse = await generateContent(defendPrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
-        const defendedScores = await scoreContent(defendedResponse.text, [productDocs]);
+        const defendedScores = await scoreContent(defendedResponse.text, [scoringContext]);
 
         // Keep best version
         const initialResult: GenerateAndScoreResult = {
@@ -972,16 +991,21 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
   const totalItems = selectedAssetTypes.length * selectedVoices.length;
   let completedItems = 0;
 
-  // Step 0: Inline community discovery
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Discovering community pain points...', progress: 2 });
-  const evidence = await runInlineDiscovery(productDocs, prompt);
+  // Step 0: Extract insights once
+  updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
+  const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  const scoringContext = formatInsightsForScoring(insights);
 
-  // Step 1: Research
+  // Step 1: Inline community discovery
+  updateJobProgress(jobId, { currentStep: 'Discovering community pain points...', progress: 5 });
+  const evidence = await runInlineDiscovery(insights, prompt);
+
+  // Step 2: Research
   updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 8 });
 
   let researchContext = '';
   try {
-    researchContext = await runCompetitiveResearch(productDocs, prompt);
+    researchContext = await runCompetitiveResearch(insights, prompt);
   } catch (error) {
     logger.warn('Competitive research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
   }
@@ -993,8 +1017,6 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
       : evidence.communityContextText;
   }
 
-  const extractedInsights = await extractInsights(productDocs);
-
   updateJobProgress(jobId, { currentStep: 'Generating from multiple perspectives...', progress: 18 });
 
   for (const assetType of selectedAssetTypes) {
@@ -1005,7 +1027,7 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
 
       try {
         // Step 2: Generate 3 perspectives in parallel
-        const baseContext = buildUserPrompt(productDocs, existingMessaging, prompt, researchContext, template, assetType, extractedInsights, evidence.evidenceLevel);
+        const baseContext = buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel);
 
         const empathyAngle = `${baseContext}
 
@@ -1061,10 +1083,10 @@ Output ONLY the synthesized content. No meta-commentary.`;
 
         // Step 4: Score all 4 versions, keep the best
         const [empathyScores, competitiveScores, thoughtScores, synthesizedScores] = await Promise.all([
-          scoreContent(empathyRes.text, [productDocs]),
-          scoreContent(competitiveRes.text, [productDocs]),
-          scoreContent(thoughtRes.text, [productDocs]),
-          scoreContent(synthesizedResponse.text, [productDocs]),
+          scoreContent(empathyRes.text, [scoringContext]),
+          scoreContent(competitiveRes.text, [scoringContext]),
+          scoreContent(thoughtRes.text, [scoringContext]),
+          scoreContent(synthesizedResponse.text, [scoringContext]),
         ]);
 
         const candidates: GenerateAndScoreResult[] = [
@@ -1178,87 +1200,6 @@ app.get('/history', async (c) => {
 
 import type { AIResponse, GenerateOptions } from '../services/ai/types.js';
 
-// ---------------------------------------------------------------------------
-// Document Pre-Extraction (Change 1)
-// ---------------------------------------------------------------------------
-
-interface ExtractedInsights {
-  productCapabilities: string[];
-  keyDifferentiators: string[];
-  targetPersonas: string[];
-  painPointsAddressed: string[];
-  claimsAndMetrics: string[];
-  technicalDetails: string[];
-  summary: string;
-}
-
-async function extractInsights(productDocs: string): Promise<ExtractedInsights | null> {
-  try {
-    const truncated = productDocs.substring(0, 30000);
-    const prompt = `Analyze the following product documentation and extract structured insights.
-
-## Documentation
-${truncated}
-
-Return a JSON object with these fields:
-- "productCapabilities": array of specific product capabilities/features (max 12)
-- "keyDifferentiators": array of what makes this product different from alternatives (max 8)
-- "targetPersonas": array of who this product is for, with their roles and concerns (max 6)
-- "painPointsAddressed": array of specific practitioner pain points this product solves (max 10)
-- "claimsAndMetrics": array of concrete claims, numbers, benchmarks, or performance metrics (max 10)
-- "technicalDetails": array of important technical details, integrations, or architecture notes (max 8)
-- "summary": a 2-3 sentence summary of what this product does and why it matters
-
-Be specific. Extract actual details, not generic descriptions. If the docs mention specific numbers, include them.
-
-IMPORTANT: Return ONLY valid JSON, no markdown code fences or explanation.`;
-
-    const response = await generateWithGemini(prompt, {
-      temperature: 0.2,
-      maxTokens: 4000,
-    });
-
-    let jsonText = response.text.trim();
-    if (jsonText.startsWith('```')) {
-      jsonText = jsonText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
-    }
-
-    return JSON.parse(jsonText) as ExtractedInsights;
-  } catch (error) {
-    logger.warn('Document insight extraction failed, falling back to raw truncation', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return null;
-  }
-}
-
-function formatInsightsForPrompt(insights: ExtractedInsights): string {
-  const sections: string[] = [];
-
-  sections.push(`### Product Summary\n${insights.summary}`);
-
-  if (insights.painPointsAddressed.length > 0) {
-    sections.push(`### Pain Points Addressed\n${insights.painPointsAddressed.map(p => `- ${p}`).join('\n')}`);
-  }
-  if (insights.productCapabilities.length > 0) {
-    sections.push(`### Capabilities\n${insights.productCapabilities.map(c => `- ${c}`).join('\n')}`);
-  }
-  if (insights.keyDifferentiators.length > 0) {
-    sections.push(`### Key Differentiators\n${insights.keyDifferentiators.map(d => `- ${d}`).join('\n')}`);
-  }
-  if (insights.claimsAndMetrics.length > 0) {
-    sections.push(`### Claims & Metrics\n${insights.claimsAndMetrics.map(c => `- ${c}`).join('\n')}`);
-  }
-  if (insights.targetPersonas.length > 0) {
-    sections.push(`### Target Personas\n${insights.targetPersonas.map(p => `- ${p}`).join('\n')}`);
-  }
-  if (insights.technicalDetails.length > 0) {
-    sections.push(`### Technical Details\n${insights.technicalDetails.map(t => `- ${t}`).join('\n')}`);
-  }
-
-  return sections.join('\n\n');
-}
-
 /** Dispatches generation to the appropriate AI model. Default is Gemini Pro.
  *  Claude is used only when explicitly selected (model contains 'claude'). */
 async function generateContent(
@@ -1321,20 +1262,8 @@ ${content}
 5. Output ONLY the rewritten content, nothing else`;
 }
 
-async function buildResearchPromptFromDocs(productDocs: string, prompt?: string): Promise<string> {
-  // Extract structured insights first so we send focused context to Deep Research,
-  // not 10k chars of raw PDF text that might be garbled
-  let productContext: string;
-  try {
-    const insights = await extractInsights(productDocs);
-    if (insights) {
-      productContext = `Product: ${insights.summary}\n\nCapabilities:\n${insights.productCapabilities.map(c => `- ${c}`).join('\n')}\n\nKey Differentiators:\n${insights.keyDifferentiators.map(d => `- ${d}`).join('\n')}\n\nPain Points Addressed:\n${insights.painPointsAddressed.map(p => `- ${p}`).join('\n')}\n\nTarget Personas:\n${insights.targetPersonas.map(p => `- ${p}`).join('\n')}`;
-    } else {
-      productContext = productDocs.substring(0, 6000);
-    }
-  } catch {
-    productContext = productDocs.substring(0, 6000);
-  }
+function buildResearchPromptFromInsights(insights: ExtractedInsights, prompt?: string): string {
+  const productContext = formatInsightsForResearch(insights);
 
   return `Conduct competitive research based on the following product context.
 
@@ -1448,43 +1377,27 @@ ${evidenceLevel === 'product-only' ? `CRITICAL: You have NO community evidence f
 }
 
 function buildUserPrompt(
-  productDocs: string,
   existingMessaging: string | undefined,
   prompt: string | undefined,
   researchContext: string,
   template: string,
   assetType: AssetType,
-  insights?: ExtractedInsights | null,
+  insights: ExtractedInsights,
   evidenceLevel?: EvidenceBundle['evidenceLevel'],
 ): string {
-  const isLongForm = assetType === 'messaging_template' || assetType === 'narrative';
-
   let userPrompt = '';
 
-  if (insights) {
-    // Lead with pain, then product intelligence, with a raw excerpt for grounding
-    const rawExcerptLimit = isLongForm ? 4000 : 2000;
-
-    // Pain section first
-    if (insights.painPointsAddressed.length > 0) {
-      userPrompt = `## The Pain (lead with this)
+  // Lead with pain, then product intelligence
+  if (insights.painPointsAddressed.length > 0) {
+    userPrompt = `## The Pain (lead with this)
 These are the real practitioner pain points this product addresses. Your opening should make the reader feel one of these:
 ${insights.painPointsAddressed.map(p => `- ${p}`).join('\n')}
 
 `;
-    }
-
-    userPrompt += `## Product Intelligence (distilled)
-${formatInsightsForPrompt(insights)}
-
-## Raw Documentation Excerpt (for grounding)
-${productDocs.substring(0, rawExcerptLimit)}`;
-  } else {
-    // Fallback: raw truncation
-    const docsLimit = isLongForm ? 16000 : 8000;
-    userPrompt = `## Product Documentation
-${productDocs.substring(0, docsLimit)}`;
   }
+
+  userPrompt += `## Product Intelligence (distilled)
+${formatInsightsForPrompt(insights)}`;
 
   if (existingMessaging) {
     userPrompt += `\n\n## Existing Messaging (for reference/improvement)

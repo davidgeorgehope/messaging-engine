@@ -162,8 +162,9 @@ describe('evidence grounding in generate.ts', () => {
     const source = readFileSync(generatePath, 'utf-8');
     // Should NOT have productDocs.substring(0, 10000)
     expect(source).not.toMatch(/productDocs\.substring\(0,\s*10000\)/);
-    // Should call extractInsights
-    expect(source).toMatch(/buildResearchPromptFromDocs[\s\S]*?extractInsights/);
+    // Should use insights-based research prompt builder
+    expect(source).toMatch(/buildResearchPromptFromInsights/);
+    expect(source).toMatch(/formatInsightsForResearch/);
   });
 
   it('storeVariant calls validateGrounding before storage', () => {
