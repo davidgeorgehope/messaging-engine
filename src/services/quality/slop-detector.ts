@@ -300,7 +300,6 @@ IMPORTANT: Return ONLY valid JSON, no markdown code fences or explanation.`;
   try {
     const response = await generateJSON<{ score: number; assessment: string; suggestions: string[] }>(prompt, {
       temperature: 0.2,
-      maxTokens: 1000,
       retryOnParseError: true,
       maxParseRetries: 2,
     });
@@ -381,7 +380,6 @@ Rules:
     const response = await generateWithGemini(prompt, {
       useProModel: true,
       temperature: 0.3,
-      maxTokens: Math.max(content.length * 2, 4000),
     });
 
     const cleaned = response.text.trim();

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This is the **PMM Messaging Engine**, an automated system that converts practitioner pain points discovered from community sources into scored, traceable messaging assets. It forks patterns from two existing projects and combines them with Claude-powered generation and a voice profile system.
+This is the **PMM Messaging Engine**, an automated system that converts practitioner pain points discovered from community sources into scored, traceable messaging assets. It forks patterns from two existing projects and combines them with AI-powered generation (Gemini by default) and a voice profile system.
 
 **Core value proposition**: Every messaging asset is grounded in real community evidence, enriched with competitive intelligence, generated in a controlled voice, stress-tested for quality, and fully traceable back to its source.
 
@@ -12,7 +12,7 @@ This is the **PMM Messaging Engine**, an automated system that converts practiti
 - **Backend**: Hono (lightweight, fast, edge-compatible web framework)
 - **Database**: SQLite via better-sqlite3 + Drizzle ORM
 - **Admin UI**: Vite + React + React Router + Tailwind CSS (in `admin/` directory)
-- **AI Models**: Gemini Flash (scoring), Gemini Deep Research (competitive research), Gemini Pro (deslop), Claude (messaging generation)
+- **AI Models**: Gemini Flash (scoring), Gemini Pro (generation, deslop), Gemini Deep Research (community/competitive research), Claude (optional override)
 - **Scheduler**: node-cron
 - **Auth**: JWT (jsonwebtoken)
 - **IDs**: nanoid (21-character string IDs)
@@ -69,14 +69,16 @@ See `DATABASE.md` for complete schema with all fields, types, and constraints.
 
 | Model | Client File | Used For | When to Choose |
 |-------|-------------|----------|----------------|
-| **Gemini Flash** | `src/ai/gemini-flash.ts` | Pain point extraction, severity/relevance scoring, quality dimension scoring | High-volume, structured output, cost-sensitive operations |
-| **Gemini Pro** | `src/ai/gemini-pro.ts` | Slop detection, deslop rewrites | Operations requiring nuanced language quality assessment |
-| **Gemini Deep Research** | `src/ai/gemini-deep-research.ts` | Competitive research | Multi-step web research with source citations (async) |
-| **Claude** | `src/ai/claude.ts` | Messaging generation (all 8 asset types) | Long-form creative writing, voice adherence, nuanced messaging |
+| **Gemini Flash** | `src/ai/gemini-flash.ts` | Pain point extraction, severity/relevance scoring, quality dimension scoring, session naming | High-volume, structured output, cost-sensitive operations |
+| **Gemini Pro** | `src/ai/gemini-pro.ts` | Messaging generation (all asset types), slop detection, deslop rewrites | Default model for all generation and quality tasks |
+| **Gemini Deep Research** | `src/ai/gemini-deep-research.ts` | Community and competitive research | Multi-step web research with source citations (async) |
+| **Claude** | `src/ai/claude.ts` | Available as optional override when explicitly selected | Only used when user picks Claude in the UI |
 
-**Claude model**: `claude-opus-4-6` (configured in `src/config.ts`).
+**Default model is Gemini.** Claude is only used when explicitly selected (model string contains 'claude'). Do not default to Claude anywhere.
 
-**Rule of thumb**: If the task is scoring/classifying, use Gemini Flash. If the task is language quality rewriting, use Gemini Pro. If the task is web research, use Gemini Deep Research. If the task is generating messaging content, use Claude.
+**Rule of thumb**: Gemini is the default for everything. Flash for scoring/classifying, Pro for generation/rewriting, Deep Research for web research. Claude is an opt-in override only.
+
+**Token limits**: Do not hardcode `maxTokens` unless you need more than the 8192 default. Newer models have much higher token limits, and low hardcoded values cause silent truncation.
 
 **JSON generation resilience**: `generateJSON()` in `src/services/ai/clients.ts` retries with error feedback on parse failures — it sends the parse error and broken response back to the model so it can self-correct (up to `maxParseRetries` attempts).
 
@@ -89,7 +91,7 @@ Voice profiles (`voice_profiles` table) define:
 - **Example snippets**: Reference text exemplifying the voice
 - **System prompt prefix**: Additional instructions injected into generation prompts
 
-Voice profiles are injected into Claude generation prompts and used as the thresholds for quality gate evaluation. An asset passes quality gates only if it meets all dimension minimums defined by its voice profile.
+Voice profiles are injected into generation prompts and used as the thresholds for quality gate evaluation. An asset passes quality gates only if it meets all dimension minimums defined by its voice profile.
 
 ## Quality Gates
 
@@ -141,7 +143,7 @@ src/
       parser.ts                         # Research result parsing
     generation/
       orchestrator.ts                   # Generation pipeline coordinator
-      engine.ts                         # Core Claude generation logic
+      engine.ts                         # Core generation logic
       context-assembler.ts              # Context assembly for prompts
       traceability.ts                   # Traceability recording
       voice-profiles.ts                 # Voice profile management

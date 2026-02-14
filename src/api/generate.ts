@@ -516,7 +516,9 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
   // Step 0: Extract insights once — single source of truth for all downstream uses
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
-  nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(() => {});
+  await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
+    logger.warn('Session naming failed', { jobId, error: err instanceof Error ? err.message : String(err) });
+  });
   const scoringContext = formatInsightsForScoring(insights);
 
   // Step 1: Community Deep Research + Competitive Research in parallel
@@ -580,7 +582,9 @@ async function runSplitResearchPipeline(jobId: string, inputs: JobInputs): Promi
   // Step 0: Extract insights once — needed before parallel research streams
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
-  nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(() => {});
+  await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
+    logger.warn('Session naming failed', { jobId, error: err instanceof Error ? err.message : String(err) });
+  });
   const scoringContext = formatInsightsForScoring(insights);
 
   updateJobProgress(jobId, { currentStep: 'Running community & competitive research...', progress: 5 });
@@ -642,7 +646,9 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
   // Step 0: Extract insights once
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
-  nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(() => {});
+  await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
+    logger.warn('Session naming failed', { jobId, error: err instanceof Error ? err.message : String(err) });
+  });
   const scoringContext = formatInsightsForScoring(insights);
 
   // Step 1: Community Deep Research — practitioner pain is the foundation
@@ -782,7 +788,9 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
   // Step 0: Extract insights once
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
-  nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(() => {});
+  await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
+    logger.warn('Session naming failed', { jobId, error: err instanceof Error ? err.message : String(err) });
+  });
   const scoringContext = formatInsightsForScoring(insights);
 
   // Step 1: Community Deep Research + Competitive Research in parallel
@@ -841,7 +849,6 @@ Be brutal. Every weakness you find makes the final output stronger. Format as a 
         const attackResponse = await generateWithGemini(attackPrompt, {
           model: config.ai.gemini.proModel,
           temperature: 0.6,
-          maxTokens: 4000,
         });
 
         // Step 4: Defend — rewrite to survive the attacks
@@ -916,7 +923,9 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
   // Step 0: Extract insights once
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
-  nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(() => {});
+  await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
+    logger.warn('Session naming failed', { jobId, error: err instanceof Error ? err.message : String(err) });
+  });
   const scoringContext = formatInsightsForScoring(insights);
 
   // Step 1: Community Deep Research + Competitive Research in parallel

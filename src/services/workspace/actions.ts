@@ -334,7 +334,6 @@ export async function runVoiceChangeAction(sessionId: string, assetType: string,
   const response = await generateWithGemini(prompt, {
     model: config.ai.gemini.proModel,
     temperature: 0.5,
-    maxTokens: 8000,
   });
 
   const scores = await scoreContent(response.text);
@@ -390,8 +389,7 @@ export async function runAdversarialLoopAction(sessionId: string, assetType: str
         const response = await generateWithGemini(refinementPrompt, {
           model: config.ai.gemini.proModel,
           temperature: 0.4,
-          maxTokens: 8000,
-        });
+              });
         content = response.text;
       } catch { break; }
     }
@@ -445,7 +443,6 @@ export async function runCompetitiveDeepDiveAction(sessionId: string, assetType:
   const enriched = await generateWithGemini(enrichmentPrompt, {
     model: config.ai.gemini.proModel,
     temperature: 0.5,
-    maxTokens: 8000,
   });
 
   const scores = await scoreContent(enriched.text);
@@ -524,7 +521,6 @@ Output ONLY the rewritten content.`;
   const rewritten = await generateWithGemini(rewritePrompt, {
     model: config.ai.gemini.proModel,
     temperature: 0.5,
-    maxTokens: 8000,
   });
 
   const scores = await scoreContent(rewritten.text);

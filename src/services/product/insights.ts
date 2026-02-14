@@ -49,7 +49,6 @@ IMPORTANT: Return ONLY valid JSON, no markdown code fences or explanation.`;
 
     const response = await generateWithGemini(prompt, {
       temperature: 0.2,
-      maxTokens: 4000,
     });
 
     let jsonText = response.text.trim();
@@ -108,14 +107,24 @@ export function buildFallbackInsights(productDocs: string): ExtractedInsights {
 // ---------------------------------------------------------------------------
 
 /**
- * ~150 chars. Used for community search and keyword extraction.
- * Only domain/category/productType — no product framing that could seed vendor bias.
+ * ~500-800 chars. Used for community Deep Research queries.
+ * Domain/category + summary + pain points addressed — enough for targeted search
+ * without injecting vendor marketing language.
  */
 export function formatInsightsForDiscovery(insights: ExtractedInsights): string {
-  const parts = [insights.domain, insights.category, insights.productType]
+  const sections: string[] = [];
+
+  const domain = [insights.domain, insights.category, insights.productType]
     .filter(p => p && p !== 'unknown');
-  if (parts.length === 0) return '';
-  return parts.join(' / ');
+  if (domain.length > 0) sections.push(domain.join(' / '));
+
+  if (insights.summary) sections.push(insights.summary);
+
+  if (insights.productCapabilities.length > 0) {
+    sections.push('Key capabilities:\n' + insights.productCapabilities.slice(0, 5).map(c => `- ${c}`).join('\n'));
+  }
+
+  return sections.join('\n\n');
 }
 
 /**

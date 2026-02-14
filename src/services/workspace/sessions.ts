@@ -460,20 +460,34 @@ export async function nameSessionFromInsights(jobId: string, insights: Extracted
   const session = await db.query.sessions.findFirst({
     where: eq(sessions.jobId, jobId),
   });
-  if (!session) return; // No session (e.g. standalone job) — skip
+  if (!session) {
+    logger.warn('nameSessionFromInsights: no session found for job', { jobId });
+    return;
+  }
 
   const assetTypeLabels = assetTypes.map(t => ASSET_TYPE_LABELS[t] || t).join(', ');
   const topic = insights.summary || `${insights.domain} ${insights.category}`.trim();
 
-  if (!topic || topic === 'unknown unknown') return; // No useful signal
+  logger.info('nameSessionFromInsights called', { jobId, sessionId: session.id, topic: topic?.substring(0, 80), domain: insights.domain, category: insights.category });
+
+  if (!topic || topic === 'unknown unknown') {
+    logger.warn('nameSessionFromInsights: no useful topic signal', { jobId });
+    return;
+  }
+
+  const domainInfo = [insights.domain, insights.category, insights.productType]
+    .filter(p => p && p !== 'unknown').join(' / ');
 
   try {
-    const prompt = `Generate a concise 3-6 word name for a messaging session.\nTopic: ${topic}\nAsset types: ${assetTypeLabels}\nExamples: 'Log Pipeline Cost Battlecard', 'K8s Alert Fatigue Launch Pack', 'Workflow Automation Messaging Suite'\nReturn ONLY the name, no quotes.`;
+    const prompt = `Generate a concise 3-6 word name for a messaging session about this topic.\nTopic: ${topic}${domainInfo ? `\nDomain: ${domainInfo}` : ''}\nAsset types: ${assetTypeLabels}\nUse the functional domain (what the product does), not brand names.\nExamples: 'Log Pipeline Cost Battlecard', 'Workflow Automation Narrative', 'Alert Fatigue Launch Pack', 'SOAR Integration Messaging'\nReturn ONLY the name, nothing else.`;
+
+    logger.debug('Naming prompt', { jobId, prompt: prompt.substring(0, 200) });
 
     const result = await generateWithGemini(prompt, {
       temperature: 0.3,
-      maxTokens: 50,
     });
+
+    logger.debug('Naming Gemini response', { jobId, raw: result.text });
 
     const name = result.text.trim().replace(/^["']|["']$/g, '');
     if (name && name.length >= 3 && name.length < 100) {
@@ -482,12 +496,14 @@ export async function nameSessionFromInsights(jobId: string, insights: Extracted
         .where(eq(sessions.id, session.id))
         .run();
       logger.info('Session named from insights', { sessionId: session.id, jobId, name });
+    } else {
+      logger.warn('Naming produced unusable result', { jobId, name, length: name?.length });
     }
   } catch (error) {
-    // Non-fatal — keep whatever placeholder name exists
     logger.warn('Failed to name session from insights', {
       jobId,
       error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
     });
   }
 }
