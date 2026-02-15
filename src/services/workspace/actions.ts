@@ -8,7 +8,7 @@ import { createLogger } from '../../utils/logger.js';
 import { analyzeSlop, deslop } from '../../services/quality/slop-detector.js';
 import { scoreContent, checkQualityGates, totalQualityScore } from '../quality/score-content.js';
 import { generateWithGemini, generateWithGeminiGroundedSearch, createDeepResearchInteraction, pollInteractionUntilComplete } from '../ai/clients.js';
-import { config, getModelForTask } from '../../config.js';
+import { getModelForTask } from '../../config.js';
 import type { ScoreResults } from '../quality/score-content.js';
 import type { AssetType } from '../../services/generation/types.js';
 import {
@@ -16,18 +16,22 @@ import {
   buildFallbackInsights,
   formatInsightsForDiscovery,
   formatInsightsForResearch,
-  formatInsightsForPrompt,
   formatInsightsForScoring,
 } from '../product/insights.js';
+// Import from pipeline modules directly — single source of truth
 import {
   buildSystemPrompt,
   buildUserPrompt,
   buildRefinementPrompt,
   loadTemplate,
-  generateContent,
   ASSET_TYPE_TEMPERATURE,
   getBannedWordsForVoice,
-} from '../../api/generate.js';
+} from '../pipeline/prompts.js';
+import {
+  generateContent,
+  generateAndScore,
+  refinementLoop,
+} from '../pipeline/orchestrator.js';
 
 const logger = createLogger('workspace:actions');
 
@@ -153,6 +157,15 @@ async function loadSessionProductDocs(session: Session): Promise<string> {
   return productContext;
 }
 
+/** Load voice profile for a session (explicit or default). */
+async function loadSessionVoice(session: Session): Promise<VoiceProfile> {
+  const db = getDatabase();
+  const voice = session.voiceProfileId
+    ? await db.query.voiceProfiles.findFirst({ where: eq(voiceProfiles.id, session.voiceProfileId) })
+    : await db.query.voiceProfiles.findFirst({ where: eq(voiceProfiles.isDefault, true) });
+  if (!voice) throw new Error('No voice profile available');
+  return voice;
+}
 
 function buildCompetitiveResearchPrompt(researchContext: string, currentContent: string, assetType: string): string {
   return `Analyze the product context below and identify the 3-5 most direct competitors. Then research each competitor in depth.
@@ -232,6 +245,8 @@ export async function runDeslopAction(sessionId: string, assetType: string): Pro
  * Regenerate an asset type from scratch using the full generation context —
  * voice profile, template, competitive research, evidence grounding, and
  * refinement loop — matching the quality of the original generation pipeline.
+ *
+ * Composes from pipeline primitives: generateAndScore + refinementLoop.
  */
 export async function runRegenerateAction(sessionId: string, assetType: string): Promise<ActionResult> {
   const db = getDatabase();
@@ -240,12 +255,7 @@ export async function runRegenerateAction(sessionId: string, assetType: string):
 
   logger.info('Running regenerate action', { sessionId, assetType });
 
-  // Load voice profile (same as original generation)
-  const voice = session.voiceProfileId
-    ? await db.query.voiceProfiles.findFirst({ where: eq(voiceProfiles.id, session.voiceProfileId) })
-    : await db.query.voiceProfiles.findFirst({ where: eq(voiceProfiles.isDefault, true) });
-  if (!voice) throw new Error('No voice profile available');
-
+  const voice = await loadSessionVoice(session);
   const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
 
   // Extract product insights
@@ -266,22 +276,15 @@ export async function runRegenerateAction(sessionId: string, assetType: string):
     }
   }
 
-  // Get existing content as reference for the regeneration
   const active = await getActiveVersion(sessionId, assetType);
   const previousScores = extractPreviousScores(active);
   const existingMessaging = active?.content;
 
-  // Determine evidence level — regeneration uses product-only since we don't re-run
-  // community Deep Research (that's what the community_check action is for)
   const evidenceLevel: 'strong' | 'partial' | 'product-only' = researchContext ? 'partial' : 'product-only';
-
-  // Generate dynamic banned words for this voice + domain
   const bannedWords = await getBannedWordsForVoice(voice, insights);
-
-  // Load the asset type template
   const template = loadTemplate(assetType as AssetType);
 
-  // Build full prompts — identical to the original generation pipeline
+  // Build prompts — same functions used by all pipelines
   const systemPrompt = buildSystemPrompt(voice, assetType as AssetType, evidenceLevel, undefined, bannedWords);
   const userPrompt = buildUserPrompt(
     existingMessaging,
@@ -293,52 +296,42 @@ export async function runRegenerateAction(sessionId: string, assetType: string):
     evidenceLevel,
   );
 
-  // Generate with the same model dispatch as the original pipeline
   const selectedModel = JSON.parse(session.metadata || '{}').model;
-  const response = await generateContent(userPrompt, {
+
+  // Use pipeline's generateAndScore — single source of truth for generate+score
+  const genResult = await generateAndScore(
+    userPrompt,
     systemPrompt,
-    temperature: ASSET_TYPE_TEMPERATURE[assetType as AssetType] ?? 0.7,
-  }, selectedModel);
+    selectedModel,
+    scoringContext,
+    thresholds,
+    assetType as AssetType,
+  );
 
-  let finalContent = response.text;
-  let scores = await scoreContent(finalContent, [scoringContext]);
-  let passesGates = checkQualityGates(scores, thresholds);
+  let finalContent = genResult.content;
+  let scores = genResult.scores;
+  let passesGates = genResult.passesGates;
 
-  // Refinement loop — deslop + refine if quality gates fail (matches original pipeline)
+  // Use pipeline's refinementLoop if quality gates fail
   if (!passesGates) {
-    logger.info('Regenerated content failed gates, attempting refinement', {
+    logger.info('Regenerated content failed gates, running refinement loop', {
       sessionId, assetType, slop: scores.slopScore, vendor: scores.vendorSpeakScore,
       auth: scores.authenticityScore, spec: scores.specificityScore, persona: scores.personaAvgScore,
     });
 
-    if (scores.slopScore > thresholds.slopMax) {
-      try {
-        finalContent = await deslop(finalContent, scores.slopAnalysis);
-      } catch (deslopErr) {
-        logger.warn('Deslop failed during regeneration, continuing with original', {
-          error: deslopErr instanceof Error ? deslopErr.message : String(deslopErr),
-        });
-      }
-    }
-
-    const refinementPrompt = buildRefinementPrompt(finalContent, scores, thresholds, voice, assetType as AssetType);
-    try {
-      const refinedResponse = await generateContent(refinementPrompt, {
-        systemPrompt,
-        temperature: 0.5,
-      }, selectedModel);
-
-      const refinedScores = await scoreContent(refinedResponse.text, [scoringContext]);
-      if (totalQualityScore(refinedScores) > totalQualityScore(scores)) {
-        finalContent = refinedResponse.text;
-        scores = refinedScores;
-        passesGates = checkQualityGates(scores, thresholds);
-      }
-    } catch (refineErr) {
-      logger.warn('Refinement failed during regeneration, keeping original', {
-        error: refineErr instanceof Error ? refineErr.message : String(refineErr),
-      });
-    }
+    const refined = await refinementLoop(
+      finalContent,
+      scoringContext,
+      thresholds,
+      voice,
+      assetType as AssetType,
+      systemPrompt,
+      selectedModel,
+      1, // single refinement iteration for workspace regeneration
+    );
+    finalContent = refined.content;
+    scores = refined.scores;
+    passesGates = refined.passesGates;
   }
 
   const version = await createVersionAndActivate(sessionId, assetType, finalContent, 'regenerate', {
@@ -387,6 +380,9 @@ export async function runVoiceChangeAction(sessionId: string, assetType: string,
  * Run adversarial loop: always attempt improvement (min 1, max 3 iterations).
  * If content already passes gates, switches to "elevation" mode to raise scores higher.
  * Only creates a new version if content actually changed.
+ *
+ * Note: This uses a custom loop rather than the pipeline's refinementLoop because
+ * it has unique "elevation mode" logic that targets scores above thresholds.
  */
 export async function runAdversarialLoopAction(sessionId: string, assetType: string): Promise<ActionResult> {
   const active = await getActiveVersion(sessionId, assetType);
@@ -399,7 +395,6 @@ export async function runAdversarialLoopAction(sessionId: string, assetType: str
   let scores = await scoreContent(content);
   let bestScore = totalQualityScore(scores);
   const maxIterations = 3;
-  let wasDeslopped = false;
 
   logger.info('Running adversarial loop', { sessionId, assetType, alreadyPassing: checkQualityGates(scores, thresholds) });
 
@@ -408,7 +403,6 @@ export async function runAdversarialLoopAction(sessionId: string, assetType: str
     if (scores.slopScore > (thresholds.slopMax ?? 5)) {
       try {
         content = await deslop(content, scores.slopAnalysis);
-        wasDeslopped = true;
       } catch { /* continue */ }
     }
 
@@ -488,7 +482,6 @@ export async function runCompetitiveDeepDiveAction(sessionId: string, assetType:
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   const researchInsights = formatInsightsForResearch(insights);
 
-  // Build research prompt
   const researchPrompt = buildCompetitiveResearchPrompt(researchInsights, active.content, assetType);
 
   // Try deep research first, fall back to grounded search
@@ -509,7 +502,6 @@ export async function runCompetitiveDeepDiveAction(sessionId: string, assetType:
     }
   }
 
-  // Enrich with Gemini Pro
   const enrichmentPrompt = buildCompetitiveEnrichmentPrompt(active.content, researchContext, assetType);
   const enriched = await generateWithGemini(enrichmentPrompt, {
     model: getModelForTask('pro'),
@@ -541,7 +533,6 @@ export async function runCommunityCheckAction(sessionId: string, assetType: stri
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   const discoveryContext = formatInsightsForDiscovery(insights);
 
-  // Single Deep Research call replaces all individual source adapters
   const deepResearchPrompt = `Search Reddit, Hacker News, Stack Overflow, GitHub Issues, developer blogs, and other practitioner communities for real discussions, complaints, and pain points related to this product area.
 
 ## Product Area
@@ -609,6 +600,8 @@ Output ONLY the rewritten content.`;
 /**
  * Run multi-perspective rewrite: generate 3 angles (empathy, competitive, thought leadership)
  * from the active version, synthesize the best elements, score all 4, keep the best.
+ *
+ * Uses pipeline's generateContent and shared prompt builders.
  */
 export async function runMultiPerspectiveAction(sessionId: string, assetType: string): Promise<ActionResult> {
   const active = await getActiveVersion(sessionId, assetType);
@@ -621,12 +614,7 @@ export async function runMultiPerspectiveAction(sessionId: string, assetType: st
 
   logger.info('Running multi-perspective action', { sessionId, assetType });
 
-  // Load voice profile
-  const voice = session.voiceProfileId
-    ? await db.query.voiceProfiles.findFirst({ where: eq(voiceProfiles.id, session.voiceProfileId) })
-    : await db.query.voiceProfiles.findFirst({ where: eq(voiceProfiles.isDefault, true) });
-  if (!voice) throw new Error('No voice profile available');
-
+  const voice = await loadSessionVoice(session);
   const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
   const productDocs = await loadSessionProductDocs(session);
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
@@ -638,7 +626,7 @@ export async function runMultiPerspectiveAction(sessionId: string, assetType: st
 
   const baseContent = active.content;
 
-  // Generate 3 perspectives in parallel using existing content as base
+  // Generate 3 perspectives in parallel — same angle prompts as multi-perspective pipeline
   const empathyPrompt = `Rewrite this ${assetType.replace(/_/g, ' ')} from a Practitioner Empathy perspective.
 
 ## Current Content
@@ -679,6 +667,8 @@ ${template}
 Output ONLY the rewritten content.`;
 
   const perspectiveTemp = ASSET_TYPE_TEMPERATURE[assetType as AssetType] ?? 0.7;
+
+  // Use pipeline's generateContent for all generations
   const [empathyRes, competitiveRes, thoughtRes] = await Promise.all([
     generateContent(empathyPrompt, { systemPrompt, temperature: perspectiveTemp }, selectedModel),
     generateContent(competitivePrompt, { systemPrompt, temperature: perspectiveTemp }, selectedModel),
