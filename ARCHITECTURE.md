@@ -224,3 +224,25 @@ Four pipelines are available, all sharing a common refinement loop:
 - **Shared refinement loop**: Up to 3 iterations of score → deslop → refine → check plateau.
 - **Pipeline step events**: `emitPipelineStep()` writes progress to `generation_jobs.pipeline_steps` for live UI streaming.
 - **Split Research pipeline removed**: Was identical to Standard.
+
+
+## Standard vs Outside-In: Pipeline Philosophy
+
+| Aspect | Standard Pipeline | Outside-In Pipeline |
+|--------|------------------|---------------------|
+| **Philosophy** | "Here is our story — validate it" | "What is the community saying — build from that" |
+| **Step 0** | Deep PoV Extraction (Gemini Pro) | Extract Insights (Gemini Flash) |
+| **Extraction** | Thesis, contrarian take, narrative arc, strongest claims | Capabilities, differentiators, pain points |
+| **Community Research** | Validation — confirms/challenges our PoV | Discovery — drives the narrative |
+| **Generation Prompt** | PoV-first: leads with thesis and narrative arc | Pain-first: leads with practitioner frustration |
+| **System Prompt** | "Lead with your point of view" | "Lead with the pain" |
+| **Content Voice** | Opinionated, defensible argument | Empathetic, practitioner-resonant |
+| **Best For** | Product launches, thought leadership, narratives | Battlecards, talk tracks, community-validated content |
+
+### Standard Pipeline Flow
+1. **Deep PoV Extraction** (Gemini Pro) — Extract thesis, contrarian take, narrative arc, strongest claims with evidence
+2. **Community Validation** — Validate PoV against practitioner reality via Deep Research
+3. **Competitive Research** — Sharpen positioning informed by community
+4. **Generate from YOUR Narrative** — PoV-first prompt, community validates, competitive sharpens
+5. **Score & Refine** — Quality gates with up to 3 refinement iterations
+6. **Store** — Persist with traceability
