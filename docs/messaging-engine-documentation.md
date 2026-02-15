@@ -29,6 +29,8 @@ The PMM Messaging Engine converts product documentation into scored, quality-tes
 
 ---
 
+![System Architecture](01-system-architecture.png)
+
 ## 2. System Architecture
 
 ### File Structure
@@ -85,6 +87,8 @@ src/
 
 ## 3. Model Profile System
 
+![Multi-Model Strategy](03-multi-model-strategy.png)
+
 Controlled by `MODEL_PROFILE` env var. Every model call logs the actual model name and emits it via pipeline step events for UI visibility.
 
 | Task | Production | Test |
@@ -120,6 +124,8 @@ If a scorer throws, it returns a neutral fallback score of 5 and the failure is 
 
 ### Quality Gates (Per-Voice Thresholds)
 
+![Quality Pipeline](04-quality-pipeline.png)
+
 | Gate | Default | Direction |
 |------|---------|-----------|
 | slopMax | 5 | Reject if above |
@@ -132,9 +138,15 @@ If a scorer throws, it returns a neutral fallback score of 5 and the failure is 
 
 ## 5. Pipelines
 
+
+![All Pipelines](05-pipelines-comparison.png)
+
 All pipelines follow a sequential DAG pattern. Each step feeds the next — no branching.
 
 ### 5.1 Standard Pipeline
+
+
+![Standard Pipeline](06-standard-pipeline.png)
 
 **PoV-first — extract a deep product thesis before generating.**
 
@@ -150,6 +162,9 @@ Deep PoV Extraction (Pro)
 
 ### 5.2 Outside-In Pipeline (Signature)
 
+
+![Outside-In Pipeline](02-outside-in-pipeline.png)
+
 **Community pain-first — start with real practitioner frustrations.**
 
 ```
@@ -163,6 +178,9 @@ Insight Extraction (Flash)
 
 ### 5.3 Adversarial Pipeline
 
+
+![Adversarial Pipeline](07-adversarial-pipeline.png)
+
 **Attack/defend — generate objections, then craft messaging that survives them.**
 
 ```
@@ -175,6 +193,9 @@ Insight Extraction (Flash)
 ```
 
 ### 5.4 Multi-Perspective Pipeline
+
+
+![Multi-Perspective Pipeline](08-multi-perspective-pipeline.png)
 
 **3 angles + synthesis — practitioner, buyer, executive perspectives merged.**
 
@@ -190,6 +211,9 @@ Insight Extraction (Flash)
 ```
 
 ### 5.5 Straight Through Pipeline
+
+
+![Straight Through Pipeline](09-straight-through-pipeline.png)
 
 **Score-only — evaluate existing content without any generation.**
 
