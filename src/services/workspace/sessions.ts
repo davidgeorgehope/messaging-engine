@@ -31,6 +31,7 @@ export interface CreateSessionInput {
   productContext?: string;
   focusInstructions?: string;
   pipeline?: string;
+  existingMessaging?: string;
 }
 
 export async function createSession(userId: string, data: CreateSessionInput) {
@@ -80,7 +81,7 @@ export async function createSession(userId: string, data: CreateSessionInput) {
     productContext: data.productContext || null,
     focusInstructions: data.focusInstructions || null,
     pipeline: data.pipeline || 'standard',
-    metadata: JSON.stringify(data.voiceProfileIds?.length ? { voiceProfileIds: data.voiceProfileIds } : {}),
+    metadata: JSON.stringify({ ...(data.voiceProfileIds?.length ? { voiceProfileIds: data.voiceProfileIds } : {}), ...(data.existingMessaging ? { existingMessaging: data.existingMessaging } : {}) }),
     isArchived: false,
     createdAt: now,
     updatedAt: now,
@@ -178,6 +179,7 @@ export async function startSessionGeneration(sessionId: string) {
     progress: 0,
     productContext: JSON.stringify({
       productDocs,
+      existingMessaging: sessionMeta.existingMessaging || undefined,
       prompt,
       voiceProfileIds,
       assetTypes,

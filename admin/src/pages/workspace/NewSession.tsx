@@ -7,7 +7,7 @@ const PIPELINE_OPTIONS = [
   {
     id: 'straight-through',
     name: 'Straight Through',
-    description: 'Quick draft + score. Refine manually in workspace.',
+    description: 'Import & score existing content. No generation — refine manually in workspace.',
     icon: '⚡',
     color: 'amber',
   },
@@ -57,6 +57,7 @@ export default function NewSession() {
   // Form state
   const [focusInstructions, setFocusInstructions] = useState('');
   const [uploadedFiles, setUploadedFiles] = useState<{ name: string; text: string }[]>([]);
+  const [existingMessaging, setExistingMessaging] = useState('');
 
   const [selectedVoiceIds, setSelectedVoiceIds] = useState<string[]>([]);
   const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([
@@ -151,7 +152,12 @@ export default function NewSession() {
       return;
     }
 
-    if (!hasProductContext()) {
+    if (isStraightThrough && !existingMessaging.trim()) {
+      setError('Straight Through mode requires existing messaging content to score.');
+      return;
+    }
+
+    if (!isStraightThrough && !hasProductContext()) {
       setError('Provide product context via file upload, paste, or document selection.');
       return;
     }
@@ -166,6 +172,7 @@ export default function NewSession() {
 
       if (selectedVoiceIds.length > 0) data.voiceProfileIds = selectedVoiceIds;
       if (focusInstructions.trim()) data.focusInstructions = focusInstructions.trim();
+      if (existingMessaging.trim()) data.existingMessaging = existingMessaging.trim();
 
       if (contextMode === 'docs' && selectedDocIds.length > 0) {
         data.productDocIds = selectedDocIds;
@@ -228,17 +235,41 @@ export default function NewSession() {
               );
             })}
           </div>
-
-          {isStraightThrough && (
-            <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-md text-amber-800 text-sm">
-              <strong>⚡ Straight Through mode:</strong> Research and auto-refinement disabled. Use workspace actions to refine after generation.
-            </div>
-          )}
         </section>
 
-        {/* 2. Product Context */}
-        <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Product Context</h2>
+        {/* 2. Existing Messaging — prominent when Straight Through is selected */}
+        {isStraightThrough && (
+          <section className="bg-white rounded-lg shadow-sm border-2 border-amber-300 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">
+              Existing Messaging to Score <span className="text-red-500">*</span>
+            </h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Paste your existing messaging below. It will be scored across all 5 quality dimensions as-is — no generation or transformation.
+            </p>
+            <textarea
+              value={existingMessaging}
+              onChange={(e) => setExistingMessaging(e.target.value)}
+              rows={10}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 outline-none text-sm font-mono"
+              placeholder="Paste your battlecard, talk track, launch messaging, or other content here..."
+              required
+            />
+            {existingMessaging.trim() && (
+              <p className="text-xs text-gray-400 mt-2">
+                {existingMessaging.trim().length.toLocaleString()} characters
+              </p>
+            )}
+          </section>
+        )}
+
+        {/* 3. Product Context */}
+        <section className={`bg-white rounded-lg shadow-sm border border-gray-200 p-6 ${isStraightThrough ? 'opacity-75' : ''}`}>
+          <h2 className="text-lg font-semibold text-gray-900 mb-1">Product Context</h2>
+          {isStraightThrough && (
+            <p className="text-sm text-amber-600 mb-3">
+              Optional for Straight Through — provides scoring context for specificity checks.
+            </p>
+          )}
 
           <div className="flex gap-4 mb-4">
             <label className="flex items-center gap-2 cursor-pointer">
@@ -317,21 +348,23 @@ export default function NewSession() {
           )}
         </section>
 
-        {/* 3. Focus / Instructions */}
-        <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Focus / Instructions <span className="text-sm font-normal text-gray-400">(optional)</span>
-          </h2>
-          <textarea
-            value={focusInstructions}
-            onChange={(e) => setFocusInstructions(e.target.value)}
-            rows={3}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
-            placeholder="e.g., Focus on migration pain from Elasticsearch, emphasize cost savings..."
-          />
-        </section>
+        {/* 4. Focus / Instructions — hidden for straight-through */}
+        {!isStraightThrough && (
+          <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+              Focus / Instructions <span className="text-sm font-normal text-gray-400">(optional)</span>
+            </h2>
+            <textarea
+              value={focusInstructions}
+              onChange={(e) => setFocusInstructions(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
+              placeholder="e.g., Focus on migration pain from Elasticsearch, emphasize cost savings..."
+            />
+          </section>
+        )}
 
-        {/* 4. Voice Profiles */}
+        {/* 5. Voice Profiles */}
         <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Voice Profiles</h2>
@@ -343,7 +376,11 @@ export default function NewSession() {
               {selectedVoiceIds.length === voices.length ? 'Deselect All' : 'Select All'}
             </button>
           </div>
-          <p className="text-xs text-gray-400 mb-3">Select voices to generate for. Leave empty to generate for all.</p>
+          <p className="text-xs text-gray-400 mb-3">
+            {isStraightThrough
+              ? 'Select voices to score against. Each voice has different quality gate thresholds.'
+              : 'Select voices to generate for. Leave empty to generate for all.'}
+          </p>
           <div className="grid grid-cols-2 gap-2">
             {voices.map((v) => (
               <label key={v.id} className="flex items-start gap-2 cursor-pointer p-2 rounded hover:bg-gray-50">
@@ -364,7 +401,7 @@ export default function NewSession() {
           </div>
         </section>
 
-        {/* 5. Asset Types */}
+        {/* 6. Asset Types */}
         <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Asset Types</h2>
@@ -376,6 +413,11 @@ export default function NewSession() {
               {selectedAssetTypes.length === assetTypes.length ? 'Deselect All' : 'Select All'}
             </button>
           </div>
+          {isStraightThrough && (
+            <p className="text-xs text-gray-400 mb-3">
+              Select the asset type that matches your content — used for scoring context.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-2">
             {assetTypes.map((type) => (
               <label key={type.id} className="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-gray-50">
@@ -398,7 +440,7 @@ export default function NewSession() {
             disabled={loading}
             className="px-6 py-2.5 bg-blue-600 text-white rounded-md font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            {loading ? 'Starting...' : 'Start Session'}
+            {loading ? (isStraightThrough ? 'Scoring...' : 'Starting...') : (isStraightThrough ? 'Score Content' : 'Start Session')}
           </button>
         </div>
       </form>

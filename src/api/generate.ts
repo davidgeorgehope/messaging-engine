@@ -575,8 +575,8 @@ async function runStraightThroughPipeline(jobId: string, inputs: JobInputs): Pro
   const { productDocs, existingMessaging, prompt, assetTypes: selectedAssetTypes, selectedVoices } = inputs;
 
   if (!existingMessaging || existingMessaging.trim().length === 0) {
-    logger.error(Straight-through pipeline requires existing messaging content to score, { jobId });
-    updateJobProgress(jobId, { status: failed, currentStep: No existing messaging provided. Straight Through mode scores existing content — paste your messaging to evaluate it. });
+    logger.error('Straight-through pipeline requires existing messaging content to score', { jobId });
+    updateJobProgress(jobId, { status: 'failed', currentStep: 'No existing messaging provided. Straight Through mode scores existing content \xe2\x80\x94 paste your messaging to evaluate it.' });
     return;
   }
 
@@ -584,119 +584,35 @@ async function runStraightThroughPipeline(jobId: string, inputs: JobInputs): Pro
   let completedItems = 0;
 
   // Step 0: Extract insights (needed for scoring context)
-  emitPipelineStep(jobId, extract-insights, running);
-  updateJobProgress(jobId, { status: running, currentStep: Extracting product insights..., progress: 5 });
+  emitPipelineStep(jobId, 'extract-insights', 'running');
+  updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 5 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(() => {});
   const scoringContext = formatInsightsForScoring(insights);
-  emitPipelineStep(jobId, extract-insights, complete);
+  emitPipelineStep(jobId, 'extract-insights', 'complete');
 
-  updateJobProgress(jobId, { currentStep: Scoring existing content..., progress: 15 });
+  updateJobProgress(jobId, { currentStep: 'Scoring existing content...', progress: 15 });
 
   for (const assetType of selectedAssetTypes) {
     for (const voice of selectedVoices) {
-      emitPipelineStep(jobId, \`score-\${assetType}-\${voice.slug}\`, running);
-      updateJobProgress(jobId, { currentStep: \`Scoring \${ASSET_TYPE_LABELS[assetType]} — \${voice.name}\` });
+      emitPipelineStep(jobId, `score-${assetType}-${voice.slug}`, 'running');
+      updateJobProgress(jobId, { currentStep: `Scoring ${ASSET_TYPE_LABELS[assetType]} \xe2\x80\x94 ${voice.name}` });
 
-      const thresholds = JSON.parse(voice.scoringThresholds || slopMax:5);
+      const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
 
       try {
-        // Score the existing content as-is — NO generation, NO transformation
+        // Score the existing content as-is \xe2\x80\x94 NO generation, NO transformation
         const scores = await scoreContent(existingMessaging, [scoringContext]);
         const passesGates = checkGates(scores, thresholds);
 
         await storeVariant(jobId, assetType, voice, existingMessaging, scores, passesGates, prompt);
 
-        emitPipelineStep(jobId, \`score-\${assetType}-\${voice.slug}\`, complete, {
+        emitPipelineStep(jobId, `score-${assetType}-${voice.slug}`, 'complete', {
           draft: existingMessaging,
           scores,
         });
       } catch (error) {
-        logger.error(Failed content..., progress: 15 });
-
-  for (const assetType of selectedAssetTypes) {
-    for (const voice of selectedVoices) {
-      emitPipelineStep(jobId, \`score-\${assetType}-\${voice.slug}\`, running);
-      updateJobProgress(jobId, { currentStep: \`Scoring \${ASSET_TYPE_LABELS[assetType]} — \${voice.name}\` });
-
-      const thresholds = JSON.parse(voice.scoringThresholds || vendorSpeakMax:5);
-
-      try {
-        // Score the existing content as-is — NO generation, NO transformation
-        const scores = await scoreContent(existingMessaging, [scoringContext]);
-        const passesGates = checkGates(scores, thresholds);
-
-        await storeVariant(jobId, assetType, voice, existingMessaging, scores, passesGates, prompt);
-
-        emitPipelineStep(jobId, \`score-\${assetType}-\${voice.slug}\`, complete, {
-          draft: existingMessaging,
-          scores,
-        });
-      } catch (error) {
-        logger.error(Failed content..., progress: 15 });
-
-  for (const assetType of selectedAssetTypes) {
-    for (const voice of selectedVoices) {
-      emitPipelineStep(jobId, \`score-\${assetType}-\${voice.slug}\`, running);
-      updateJobProgress(jobId, { currentStep: \`Scoring \${ASSET_TYPE_LABELS[assetType]} — \${voice.name}\` });
-
-      const thresholds = JSON.parse(voice.scoringThresholds || authenticityMin:6);
-
-      try {
-        // Score the existing content as-is — NO generation, NO transformation
-        const scores = await scoreContent(existingMessaging, [scoringContext]);
-        const passesGates = checkGates(scores, thresholds);
-
-        await storeVariant(jobId, assetType, voice, existingMessaging, scores, passesGates, prompt);
-
-        emitPipelineStep(jobId, \`score-\${assetType}-\${voice.slug}\`, complete, {
-          draft: existingMessaging,
-          scores,
-        });
-      } catch (error) {
-        logger.error(Failed content..., progress: 15 });
-
-  for (const assetType of selectedAssetTypes) {
-    for (const voice of selectedVoices) {
-      emitPipelineStep(jobId, \`score-\${assetType}-\${voice.slug}\`, running);
-      updateJobProgress(jobId, { currentStep: \`Scoring \${ASSET_TYPE_LABELS[assetType]} — \${voice.name}\` });
-
-      const thresholds = JSON.parse(voice.scoringThresholds || specificityMin:6);
-
-      try {
-        // Score the existing content as-is — NO generation, NO transformation
-        const scores = await scoreContent(existingMessaging, [scoringContext]);
-        const passesGates = checkGates(scores, thresholds);
-
-        await storeVariant(jobId, assetType, voice, existingMessaging, scores, passesGates, prompt);
-
-        emitPipelineStep(jobId, \`score-\${assetType}-\${voice.slug}\`, complete, {
-          draft: existingMessaging,
-          scores,
-        });
-      } catch (error) {
-        logger.error(Failed content..., progress: 15 });
-
-  for (const assetType of selectedAssetTypes) {
-    for (const voice of selectedVoices) {
-      emitPipelineStep(jobId, \`score-\${assetType}-\${voice.slug}\`, running);
-      updateJobProgress(jobId, { currentStep: \`Scoring \${ASSET_TYPE_LABELS[assetType]} — \${voice.name}\` });
-
-      const thresholds = JSON.parse(voice.scoringThresholds || personaMin:6);
-
-      try {
-        // Score the existing content as-is — NO generation, NO transformation
-        const scores = await scoreContent(existingMessaging, [scoringContext]);
-        const passesGates = checkGates(scores, thresholds);
-
-        await storeVariant(jobId, assetType, voice, existingMessaging, scores, passesGates, prompt);
-
-        emitPipelineStep(jobId, \`score-\${assetType}-\${voice.slug}\`, complete, {
-          draft: existingMessaging,
-          scores,
-        });
-      } catch (error) {
-        logger.error(Failed to score content, {
+        logger.error('Failed to score content', {
           jobId, assetType, voice: voice.name,
           error: error instanceof Error ? error.message : String(error),
         });
