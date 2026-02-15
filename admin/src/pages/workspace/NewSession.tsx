@@ -3,6 +3,52 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../../api/client';
 import FileUpload from '../../components/FileUpload';
 
+const PIPELINE_OPTIONS = [
+  {
+    id: 'straight-through',
+    name: 'Straight Through',
+    description: 'Quick draft + score. Refine manually in workspace.',
+    icon: '⚡',
+    color: 'amber',
+  },
+  {
+    id: 'standard',
+    name: 'Standard',
+    description: 'Product PoV first. Deep extraction → research → generate → auto-refine.',
+    icon: '🔬',
+    color: 'blue',
+  },
+  {
+    id: 'outside-in',
+    name: 'Outside-In',
+    description: 'Community pain first. Practitioner research → pain draft → competitive enrichment → auto-refine.',
+    icon: '🎯',
+    color: 'green',
+  },
+  {
+    id: 'adversarial',
+    name: 'Adversarial',
+    description: 'Battle-tested. Generate → attack → defend (2 rounds) → auto-refine.',
+    icon: '⚔️',
+    color: 'red',
+  },
+  {
+    id: 'multi-perspective',
+    name: 'Multi-Perspective',
+    description: '3 angles synthesized. Empathy + competitive + thought leadership → best elements → auto-refine.',
+    icon: '🔮',
+    color: 'purple',
+  },
+];
+
+const PIPELINE_COLORS: Record<string, { selected: string; border: string; bg: string }> = {
+  amber: { selected: 'border-amber-500 bg-amber-50 ring-2 ring-amber-200', border: 'border-gray-200 hover:border-amber-300', bg: 'bg-amber-100 text-amber-700' },
+  blue: { selected: 'border-blue-500 bg-blue-50 ring-2 ring-blue-200', border: 'border-gray-200 hover:border-blue-300', bg: 'bg-blue-100 text-blue-700' },
+  green: { selected: 'border-green-500 bg-green-50 ring-2 ring-green-200', border: 'border-gray-200 hover:border-green-300', bg: 'bg-green-100 text-green-700' },
+  red: { selected: 'border-red-500 bg-red-50 ring-2 ring-red-200', border: 'border-gray-200 hover:border-red-300', bg: 'bg-red-100 text-red-700' },
+  purple: { selected: 'border-purple-500 bg-purple-50 ring-2 ring-purple-200', border: 'border-gray-200 hover:border-purple-300', bg: 'bg-purple-100 text-purple-700' },
+};
+
 export default function NewSession() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -26,6 +72,8 @@ export default function NewSession() {
   const [voices, setVoices] = useState<any[]>([]);
   const [assetTypes, setAssetTypes] = useState<any[]>([]);
   const [documents, setDocuments] = useState<any[]>([]);
+
+  const isStraightThrough = pipeline === 'straight-through';
 
   useEffect(() => {
     Promise.all([
@@ -146,7 +194,49 @@ export default function NewSession() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-8">
-        {/* 1. Product Context */}
+        {/* 1. Pipeline Selection — FIRST */}
+        <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Pipeline</h2>
+          <div className="space-y-3">
+            {PIPELINE_OPTIONS.map((opt) => {
+              const colors = PIPELINE_COLORS[opt.color];
+              const isSelected = pipeline === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setPipeline(opt.id)}
+                  className={`w-full text-left p-4 rounded-lg border transition-all ${
+                    isSelected ? colors.selected : colors.border
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="text-xl mt-0.5">{opt.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900">{opt.name}</span>
+                        {isSelected && (
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${colors.bg}`}>
+                            Selected
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-500 mt-0.5">{opt.description}</p>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {isStraightThrough && (
+            <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-md text-amber-800 text-sm">
+              <strong>⚡ Straight Through mode:</strong> Research and auto-refinement disabled. Use workspace actions to refine after generation.
+            </div>
+          )}
+        </section>
+
+        {/* 2. Product Context */}
         <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Product Context</h2>
 
@@ -227,7 +317,7 @@ export default function NewSession() {
           )}
         </section>
 
-        {/* 2. Focus / Instructions */}
+        {/* 3. Focus / Instructions */}
         <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">
             Focus / Instructions <span className="text-sm font-normal text-gray-400">(optional)</span>
@@ -241,7 +331,7 @@ export default function NewSession() {
           />
         </section>
 
-        {/* 3. Voice Profiles */}
+        {/* 4. Voice Profiles */}
         <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Voice Profiles</h2>
@@ -274,7 +364,7 @@ export default function NewSession() {
           </div>
         </section>
 
-        {/* 4. Asset Types */}
+        {/* 5. Asset Types */}
         <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-900">Asset Types</h2>
@@ -299,22 +389,6 @@ export default function NewSession() {
               </label>
             ))}
           </div>
-        </section>
-
-        {/* 5. Pipeline */}
-        <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Pipeline</h2>
-          <select
-            value={pipeline}
-            onChange={(e) => setPipeline(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
-          >
-            <option value="standard">Standard (Research, Generate, Score, Refine)</option>
-            <option value="split-research">Split Research (Competitive + Practitioner Pain in parallel)</option>
-            <option value="outside-in">Outside-In (Practitioner pain first, refine inward)</option>
-            <option value="adversarial">Adversarial (Generate, Attack, Defend, Finalize)</option>
-            <option value="multi-perspective">Multi-Perspective (3 angles, synthesize best)</option>
-          </select>
         </section>
 
         {/* Submit */}

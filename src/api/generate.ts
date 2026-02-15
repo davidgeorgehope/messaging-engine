@@ -566,6 +566,76 @@ async function storeVariant(
   });
 }
 
+
+// ---------------------------------------------------------------------------
+// Pipeline: Straight Through (extract insights → generate → score, no research/refinement)
+// ---------------------------------------------------------------------------
+
+async function runStraightThroughPipeline(jobId: string, inputs: JobInputs): Promise<void> {
+  const { productDocs, existingMessaging, prompt, assetTypes: selectedAssetTypes, model: selectedModel, selectedVoices } = inputs;
+  const totalItems = selectedAssetTypes.length * selectedVoices.length;
+  let completedItems = 0;
+
+  // Step 0: Extract insights (still needed for context)
+  emitPipelineStep(jobId, 'extract-insights', 'running');
+  updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 5 });
+  const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(() => {});
+  const scoringContext = formatInsightsForScoring(insights);
+  emitPipelineStep(jobId, 'extract-insights', 'complete');
+
+  // Generate banned words (still useful even in straight-through)
+  const bannedWordsCache = new Map<string, string[]>();
+
+  updateJobProgress(jobId, { currentStep: 'Generating...', progress: 15 });
+
+  for (const assetType of selectedAssetTypes) {
+    const template = loadTemplate(assetType);
+    const temp = ASSET_TYPE_TEMPERATURE[assetType] ?? 0.7;
+
+    for (const voice of selectedVoices) {
+      emitPipelineStep(jobId, `generate-${assetType}-${voice.slug}`, 'running');
+      updateJobProgress(jobId, { currentStep: `Generating ${ASSET_TYPE_LABELS[assetType]} — ${voice.name}` });
+
+      const cacheKey = `${voice.id}:${insights.domain}`;
+      if (!bannedWordsCache.has(cacheKey)) {
+        bannedWordsCache.set(cacheKey, await generateBannedWords(voice, insights));
+      }
+      const bannedWords = bannedWordsCache.get(cacheKey)!;
+
+      const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
+      const systemPrompt = buildSystemPrompt(voice, assetType, 'product-only', 'straight-through' as any, bannedWords);
+      const userPrompt = buildUserPrompt(existingMessaging, prompt, '', template, assetType, insights, 'product-only');
+
+      try {
+        // Generate
+        const response = await generateContent(userPrompt, { systemPrompt, temperature: temp }, selectedModel);
+
+        // Score only — no refinement
+        const scores = await scoreContent(response.text, [scoringContext]);
+        const passesGates = checkGates(scores, thresholds);
+
+        await storeVariant(jobId, assetType, voice, response.text, scores, passesGates, prompt, undefined, { systemPrompt, userPrompt });
+
+        emitPipelineStep(jobId, `generate-${assetType}-${voice.slug}`, 'complete', {
+          draft: response.text,
+          scores
+        });
+      } catch (error) {
+        logger.error('Failed to generate variant', {
+          jobId, assetType, voice: voice.name,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
+      completedItems++;
+      updateJobProgress(jobId, { progress: Math.min(Math.round(15 + (completedItems / totalItems) * 80), 95) });
+    }
+  }
+
+  return finalizeJob(jobId, false, 0);
+}
+
 // ---------------------------------------------------------------------------
 // Pipeline: Standard (Research → Generate → Refinement Loop → Store)
 // ---------------------------------------------------------------------------
@@ -1153,6 +1223,7 @@ async function finalizeJob(jobId: string, researchAvailable: boolean, researchLe
 }
 
 const PIPELINE_RUNNERS: Record<string, (jobId: string, inputs: JobInputs) => Promise<void>> = {
+  'straight-through': runStraightThroughPipeline,
   standard: runStandardPipeline,
   'outside-in': runOutsideInPipeline,
   adversarial: runAdversarialPipeline,
