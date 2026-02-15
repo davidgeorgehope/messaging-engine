@@ -19,7 +19,7 @@ import { runPublicGenerationJob } from '../../src/api/generate.js';
 import { generateId } from '../../src/utils/hash.js';
 
 // Verify test profile is active
-import { getActiveModelProfile } from '../../src/config.js';
+import { getActiveModelProfile, getModelForTask } from '../../src/config.js';
 
 const TEST_PRODUCT_DOCS = `
 AcmeDeploy is a deployment automation platform for DevOps teams.
@@ -96,6 +96,7 @@ async function getJobResult(jobId: string) {
 describe('All 5 Pipelines E2E (Flash model profile)', () => {
   beforeAll(async () => {
     expect(getActiveModelProfile()).toBe('test');
+    console.log(`\n🛡️  MODEL_PROFILE=${getActiveModelProfile()} — all calls using: ${getModelForTask('flash')}\n`);
     await initializeDatabase();
 
     // Get first active voice profile
