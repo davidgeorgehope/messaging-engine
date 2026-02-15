@@ -1368,15 +1368,7 @@ Lead with the thesis or contrarian take. Make the reader think "that's a bold bu
   return result;
 }
 
-const DEFAULT_BANNED_WORDS = [
-  "industry-leading", "best-in-class", "next-generation", "enterprise-grade",
-  "mission-critical", "turnkey", "end-to-end", "single pane of glass",
-  "seamless", "robust", "leverage", "cutting-edge", "game-changer"
-];
-
 export function buildSystemPrompt(voice: any, assetType: AssetType, evidenceLevel?: EvidenceBundle['evidenceLevel'], pipeline?: 'standard' | 'outside-in'): string {
-  const bannedWords: string[] = voice.bannedWords ? JSON.parse(voice.bannedWords) : DEFAULT_BANNED_WORDS;
-  const bannedWordsList = bannedWords.map(w => `"${w}"`).join(', ');
   let typeInstructions = '';
 
   if (assetType === 'messaging_template') {
@@ -1433,7 +1425,7 @@ ${typeInstructions}
 5. Every claim must be traceable to the product docs or research
 6. Sound like someone who understands the practitioner's world, not someone selling to them
 7. Be specific — names, numbers, scenarios. Vague messaging is bad messaging.
-8. DO NOT use these banned words/phrases: ${bannedWordsList}
+8. Avoid language that would feel inauthentic or vendor-heavy to the target audience of this voice profile. You understand what sounds fake to practitioners in this field — don't use it. When in doubt, ask yourself: would the target persona actually say this to a peer? If not, rephrase it.
 
 ## Evidence Grounding Rules
 ${evidenceLevel === 'product-only' ? `CRITICAL: You have NO community evidence for this generation. Do NOT fabricate practitioner quotes or use phrases like "practitioners say...", "as one engineer noted...", "community sentiment suggests...", "teams report...", or "according to engineers on Reddit...". Write from product documentation only. Where practitioner validation would strengthen a point, write: "[Needs community validation]".` : `You have real community evidence in the prompt. ONLY reference practitioners and quotes from the "Verified Community Evidence" section. Do NOT fabricate additional quotes or community references beyond what is provided. Every practitioner reference must come from that section.`}`;

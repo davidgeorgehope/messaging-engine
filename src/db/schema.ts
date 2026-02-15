@@ -217,7 +217,6 @@ export const voiceProfiles = sqliteTable('voice_profiles', {
   examplePhrases: text('example_phrases').notNull(), // JSON
   isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
   isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
-  bannedWords: text('banned_words'), // JSON array of strings, nullable
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
 });
