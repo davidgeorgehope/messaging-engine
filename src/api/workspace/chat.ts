@@ -31,7 +31,7 @@ app.post('/:id/chat', async (c) => {
   const session = await verifySessionAccess(sessionId, user);
   if (!session) return c.json({ error: 'Session not found' }, 404);
 
-  let body: any;
+  let body: { message?: string; assetType?: string };
   try {
     body = await c.req.json();
   } catch {

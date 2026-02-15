@@ -1,3 +1,5 @@
+import type { VoiceProfile, SessionVersion, Session, ScoringThresholds } from '../../types/index.js';
+import { parseScoringThresholds } from '../../types/index.js';
 import { eq, and, desc } from 'drizzle-orm';
 import { getDatabase } from '../../db/index.js';
 import { sessions, sessionVersions, voiceProfiles, productDocuments, generationJobs } from '../../db/schema.js';
@@ -30,7 +32,7 @@ import {
 const logger = createLogger('workspace:actions');
 
 export interface ActionResult {
-  version: any;
+  version: SessionVersion | null | undefined;
   previousScores: {
     slop: number | null;
     vendorSpeak: number | null;
@@ -41,7 +43,7 @@ export interface ActionResult {
   } | null;
 }
 
-function extractPreviousScores(active: any): ActionResult['previousScores'] {
+function extractPreviousScores(active: SessionVersion | null | undefined): ActionResult['previousScores'] {
   if (!active || active.slopScore === null) return null;
   return {
     slop: active.slopScore,
@@ -83,9 +85,9 @@ async function createVersionAndActivate(
   assetType: string,
   content: string,
   source: string,
-  sourceDetail: any,
+  sourceDetail: Record<string, unknown>,
   scores?: ScoreResults,
-  thresholds?: any,
+  thresholds?: ScoringThresholds,
 ) {
   const db = getDatabase();
   const versionNumber = await getNextVersionNumber(sessionId, assetType);
@@ -134,10 +136,10 @@ async function loadSessionThresholds(sessionId: string) {
   }
   const voice = await db.query.voiceProfiles.findFirst({ where: eq(voiceProfiles.id, session.voiceProfileId) });
   if (!voice) return { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6 };
-  return JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
+  return parseScoringThresholds(voice.scoringThresholds);
 }
 
-async function loadSessionProductDocs(session: any): Promise<string> {
+async function loadSessionProductDocs(session: Session): Promise<string> {
   const db = getDatabase();
   let productContext = session.productContext || '';
   const docIds = session.productDocIds ? JSON.parse(session.productDocIds) : [];
@@ -145,7 +147,7 @@ async function loadSessionProductDocs(session: any): Promise<string> {
     const docs = await Promise.all(
       docIds.map((id: string) => db.query.productDocuments.findFirst({ where: eq(productDocuments.id, id) }))
     );
-    const docsText = docs.filter(Boolean).map((d: any) => `## ${d.name}\n${d.content}`).join('\n\n');
+    const docsText = docs.filter(Boolean).map((d: { name: string; content: string | null }) => `## ${d.name}\n${d.content}`).join('\n\n');
     productContext = docsText + (productContext ? `\n\n${productContext}` : '');
   }
   return productContext;

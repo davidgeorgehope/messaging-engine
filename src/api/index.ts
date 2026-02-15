@@ -84,11 +84,11 @@ export function createApi() {
         user: { id: user.id, username: user.username, displayName: user.displayName, role: user.role },
         expiresIn: config.admin.jwtExpiresIn,
       }, 201);
-    } catch (error: any) {
-      if (error.message?.includes('UNIQUE constraint')) {
+    } catch (error: unknown) {
+      if ((error as Error).message?.includes('UNIQUE constraint')) {
         return c.json({ error: 'Username or email already taken' }, 409);
       }
-      return c.json({ error: error.message || 'Signup failed' }, 500);
+      return c.json({ error: (error as Error).message || 'Signup failed' }, 500);
     }
   });
 

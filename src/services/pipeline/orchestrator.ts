@@ -1,3 +1,4 @@
+import type { VoiceProfile, ScoringThresholds, PipelineStep, PipelineStepData } from '../../types/index.js';
 // Pipeline orchestration: job helpers, generate+score, refinement, variant storage, dispatch
 // Extracted from src/api/generate.ts
 
@@ -31,7 +32,7 @@ export interface JobInputs {
   assetTypes: AssetType[];
   model: string;
   pipeline: string;
-  selectedVoices: any[];
+  selectedVoices: VoiceProfile[];
 }
 
 export async function loadJobInputs(jobId: string): Promise<JobInputs> {
@@ -64,15 +65,15 @@ export async function loadJobInputs(jobId: string): Promise<JobInputs> {
 // Pipeline Step Events
 // ---------------------------------------------------------------------------
 
-export function emitPipelineStep(jobId: string, step: string, status: 'running' | 'complete', data?: { draft?: string; scores?: any; model?: string; scorerHealth?: ScorerHealth }) {
+export function emitPipelineStep(jobId: string, step: string, status: 'running' | 'complete', data?: PipelineStepData) {
   const db = getDatabase();
   const job = db.select().from(generationJobs).where(eq(generationJobs.id, jobId)).get();
-  const steps = JSON.parse((job as any)?.pipelineSteps || '[]');
+  const steps = JSON.parse((job as { pipelineSteps?: string } | undefined)?.pipelineSteps || '[]');
 
   if (status === 'running') {
     steps.push({ step, status, startedAt: new Date().toISOString(), ...(data?.model && { model: data.model }) });
   } else {
-    const existing = steps.findLast((s: any) => s.step === step);
+    const existing = steps.findLast((s: PipelineStep) => s.step === step);
     if (existing) {
       existing.status = 'complete';
       existing.completedAt = new Date().toISOString();
@@ -132,7 +133,7 @@ export async function generateAndScore(
   systemPrompt: string,
   model: string,
   scoringContext: string,
-  thresholds: any,
+  thresholds: ScoringThresholds,
   assetType?: AssetType,
 ): Promise<GenerateAndScoreResult> {
   const temperature = assetType ? ASSET_TYPE_TEMPERATURE[assetType] ?? 0.7 : 0.7;
@@ -154,8 +155,8 @@ export async function generateAndScore(
 export async function refinementLoop(
   content: string,
   scoringContext: string,
-  thresholds: any,
-  voice: any,
+  thresholds: ScoringThresholds,
+  voice: VoiceProfile,
   assetType: AssetType,
   systemPrompt: string,
   model: string,
@@ -221,7 +222,7 @@ export async function refinementLoop(
 export async function storeVariant(
   jobId: string,
   assetType: AssetType,
-  voice: any,
+  voice: VoiceProfile,
   content: string,
   scores: ScoreResults,
   passesGates: boolean,

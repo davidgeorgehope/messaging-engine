@@ -1,3 +1,4 @@
+import type { VoiceProfile, ScoringThresholds } from '../../types/index.js';
 // Pipeline prompt builders, templates, and constants
 // Extracted from src/api/generate.ts
 
@@ -81,7 +82,7 @@ const DEFAULT_BANNED_WORDS = [
   "seamless", "robust", "leverage", "cutting-edge", "game-changer"
 ];
 
-export async function generateBannedWords(voice: any, insights: ExtractedInsights): Promise<string[]> {
+export async function generateBannedWords(voice: VoiceProfile, insights: ExtractedInsights): Promise<string[]> {
   const prompt = `Given this voice profile and product domain, list 15-20 specific words and phrases that would sound inauthentic, vendor-heavy, or like AI-generated marketing copy to the target audience. Return ONLY a JSON array of strings.
 
 Voice: ${voice.name} — ${voice.description}
@@ -111,7 +112,7 @@ Return ONLY a JSON array like: ["phrase1", "phrase2", ...]`;
 // Cache: voiceId:domain -> banned words (per-process, cleared on restart)
 export const bannedWordsCache = new Map<string, string[]>();
 
-export async function getBannedWordsForVoice(voice: any, insights: ExtractedInsights): Promise<string[]> {
+export async function getBannedWordsForVoice(voice: VoiceProfile, insights: ExtractedInsights): Promise<string[]> {
   const cacheKey = `${voice.id}:${insights.domain || 'unknown'}`;
   if (bannedWordsCache.has(cacheKey)) return bannedWordsCache.get(cacheKey)!;
   const words = await generateBannedWords(voice, insights);
@@ -119,7 +120,7 @@ export async function getBannedWordsForVoice(voice: any, insights: ExtractedInsi
   return words;
 }
 
-export function buildSystemPrompt(voice: any, assetType: AssetType, evidenceLevel?: EvidenceBundle['evidenceLevel'], pipeline?: 'standard' | 'outside-in', bannedWords?: string[]): string {
+export function buildSystemPrompt(voice: VoiceProfile, assetType: AssetType, evidenceLevel?: EvidenceBundle['evidenceLevel'], pipeline?: 'standard' | 'outside-in', bannedWords?: string[]): string {
   let typeInstructions = '';
 
   if (assetType === 'messaging_template') {
@@ -318,8 +319,8 @@ Minimal product mentions. Maximum practitioner empathy. Output ONLY the content.
 export function buildRefinementPrompt(
   content: string,
   scores: ScoreResults,
-  thresholds: any,
-  voice: any,
+  thresholds: ScoringThresholds,
+  voice: VoiceProfile,
   assetType: AssetType,
   wasDeslopped: boolean = false,
 ): string {

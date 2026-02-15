@@ -566,7 +566,7 @@ export async function pollInteractionUntilComplete(
 
             const result = operation.response ?? operation.result;
             const text = result?.text
-              ?? result?.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('')
+              ?? result?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text).join('')
               ?? '';
             const sources = extractSourcesFromResponse(text, result);
 
@@ -603,7 +603,7 @@ export async function pollInteractionUntilComplete(
 /**
  * Extracts structured SearchResult sources from a deep research response.
  */
-export function extractSourcesFromResponse(text: string, interaction: any): SearchResult[] {
+export function extractSourcesFromResponse(text: string, interaction: Record<string, any>): SearchResult[] {
   const sources: SearchResult[] = [];
   const seenUrls = new Set<string>();
 

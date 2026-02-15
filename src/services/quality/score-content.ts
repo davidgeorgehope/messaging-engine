@@ -2,7 +2,7 @@
 // Replaces duplicated scoreContent() in actions.ts and generate.ts
 // Calls all 5 real scorers — never fakes authenticity as vendor-speak inversion
 
-import { analyzeSlop } from './slop-detector.js';
+import { analyzeSlop, type SlopAnalysis } from './slop-detector.js';
 import { analyzeVendorSpeak } from './vendor-speak.js';
 import { analyzeSpecificity } from './specificity.js';
 import { analyzeAuthenticity } from './authenticity.js';
@@ -23,7 +23,7 @@ export interface ScoreResults {
   authenticityScore: number;
   specificityScore: number;
   personaAvgScore: number;
-  slopAnalysis: any;
+  slopAnalysis: SlopAnalysis;
   scorerHealth: ScorerHealth;
 }
 
@@ -47,7 +47,7 @@ export async function scoreContent(content: string, productDocs: string[] = []):
   ]);
 
   const personaAvg = personaResults.length > 0
-    ? personaResults.reduce((sum: number, r: any) => sum + r.score, 0) / personaResults.length
+    ? personaResults.reduce((sum: number, r: { score: number }) => sum + r.score, 0) / personaResults.length
     : 5;
 
   const scorerHealth: ScorerHealth = {
@@ -71,7 +71,9 @@ export async function scoreContent(content: string, productDocs: string[] = []):
   };
 }
 
-export function checkQualityGates(scores: ScoreResults, thresholds: any): boolean {
+import type { ScoringThresholds } from '../../types/index.js';
+
+export function checkQualityGates(scores: ScoreResults, thresholds: ScoringThresholds): boolean {
   return (
     scores.slopScore <= (thresholds.slopMax ?? DEFAULT_THRESHOLDS.slopMax) &&
     scores.vendorSpeakScore <= (thresholds.vendorSpeakMax ?? DEFAULT_THRESHOLDS.vendorSpeakMax) &&

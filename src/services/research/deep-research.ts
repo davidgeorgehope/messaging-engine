@@ -85,11 +85,11 @@ export async function pollInteractionUntilComplete(
   }
 }
 
-function extractTextFromOutputs(outputs: any[]): string {
+function extractTextFromOutputs(outputs: Array<string | { text?: string; content?: string | unknown }>): string {
   if (!outputs || outputs.length === 0) return '';
 
   return outputs
-    .map((output: any) => {
+    .map((output) => {
       if (typeof output === 'string') return output;
       if (output.text) return output.text;
       if (output.content) return typeof output.content === 'string' ? output.content : JSON.stringify(output.content);
@@ -99,7 +99,7 @@ function extractTextFromOutputs(outputs: any[]): string {
     .join('\n\n');
 }
 
-function extractSourcesFromResponse(interaction: any, text: string): SearchResult[] {
+function extractSourcesFromResponse(interaction: Record<string, any>, text: string): SearchResult[] {
   const sources: SearchResult[] = [];
   const seenUrls = new Set<string>();
 
