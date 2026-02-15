@@ -121,8 +121,8 @@ describe('evidence grounding in generate.ts', () => {
     // Standard, adversarial, and multi-perspective should all run community + competitive in parallel
     const parallelPattern = /Promise\.all\(\[\s*\n?\s*runCommunityDeepResearch/g;
     const matches = source.match(parallelPattern);
-    // At least 4 pipelines use parallel pattern (standard, split, adversarial, multi-perspective)
-    expect(matches?.length).toBeGreaterThanOrEqual(4);
+    // At least 3 pipelines use parallel pattern (standard, adversarial, multi-perspective)
+    expect(matches?.length).toBeGreaterThanOrEqual(3);
   });
 });
 

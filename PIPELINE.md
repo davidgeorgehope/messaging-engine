@@ -151,72 +151,57 @@ For each high-priority pain point (or messaging priority), conduct automated com
 
 ---
 
-## Stage 4: Messaging Generation
+## Stage 4: Messaging Generation (Pipeline Variants)
 
 ### Purpose
 
-The core generation stage. Takes a pain point, combines it with product context and competitive research, applies a voice profile, and uses Claude to generate messaging assets of specified types.
+The core generation stage. Takes product docs (or pain points), combines with research and voice profiles, and generates messaging through one of four pipeline variants. All pipelines end with a shared **refinement loop** that iteratively improves content until quality gates pass.
 
-### Input
+### Available Pipelines
 
-- One or more `discovered_pain_points` (the primary input)
-- `product_documents` chunks relevant to the pain point (retrieved from Stage 2)
-- `competitive_research` findings relevant to the pain point (from Stage 3)
-- `voice_profiles` entry defining the desired voice
-- Requested asset types (battlecard, talk track, launch messaging, social hook, one-pager, email copy)
+#### Standard Pipeline
+Sequential DAG: Extract Insights → Research (community + competitive, parallel) → Generate → Refinement Loop → Store
 
-### Process
+The default pipeline. Extracts product insights, runs community deep research and competitive research in parallel, generates content, then runs the shared refinement loop (up to 3 iterations) to meet quality gates.
 
-1. **Context Assembly**: The generation orchestrator assembles a comprehensive context object:
-   - Pain point summaries and verbatim quotes
-   - Relevant product document chunks (top 5 by relevance)
-   - Competitive research findings and gaps
-   - Voice profile attributes, vocabulary rules, and example snippets
+#### Outside-In Pipeline
+Sequential DAG: Extract Insights → Community Research → Pain-Grounded Draft → Competitive Research → Enrich with Competitive Intel → Layer Product Specifics → Refinement Loop → Store
 
-2. **Prompt Construction**: A structured prompt is built for each asset type. The prompt template includes:
-   - System prompt with voice profile instructions
-   - Pain point evidence section with quotes
-   - Product context section with relevant facts
-   - Competitive context section with positioning and gaps
-   - Asset type instructions with format requirements
-   - Anti-slop instructions (avoid clichés, be specific, use practitioner language)
+Starts from pure practitioner pain. Generates a first draft grounded entirely in community evidence, then sequentially enriches it with competitive positioning and product specifics. Each step feeds the next — no "pick best" comparisons. Falls back to Standard if no community evidence is found.
 
-3. **Generation**: The assembled prompt is sent to Claude. Each asset type is generated in a separate API call to ensure focused, high-quality output. Generation parameters:
-   - Temperature: 0.7 (balanced creativity/consistency)
-   - Max tokens: Varies by asset type (social hook: 500, battlecard: 3000, one-pager: 5000)
+#### Adversarial Pipeline
+Sequential DAG: Extract Insights → Research (parallel) → Generate Draft → Attack Round 1 → Defend Round 1 → Attack Round 2 → Defend Round 2 → Refinement Loop → Store
 
-4. **Asset Type Specifications**:
+Generates an initial draft, then puts it through two rounds of adversarial sparring. A hostile skeptical practitioner critic (Gemini Pro) attacks the content, then the defender rewrites to survive every objection. The defended version after 2 rounds IS the output — no comparison against the initial draft.
 
-   | Asset Type | Description | Typical Length | Key Sections |
-   |------------|-------------|---------------|--------------|
-   | **Battlecard** | Competitive comparison card | 800-1500 words | Pain point, our approach, competitor approach, objection handling, proof points |
-   | **Talk Track** | Sales conversation guide | 500-1000 words | Opening, discovery questions, pain validation, positioning, proof points, objection responses |
-   | **Launch Messaging** | Product launch copy | 1000-2000 words | Headline, subhead, pain statement, solution narrative, key benefits, call to action |
-   | **Social Hook** | Social media post | 100-280 characters | Hook, pain acknowledgment, value proposition, CTA |
-   | **One-Pager** | Executive summary document | 1500-2500 words | Executive summary, problem statement, solution overview, competitive differentiation, ROI/impact |
-   | **Email Copy** | Outbound email sequence | 300-600 words per email | Subject line, opening hook, pain validation, value proposition, CTA |
+#### Multi-Perspective Pipeline
+Sequential DAG: Extract Insights → Research (parallel) → Generate 3 Perspectives (parallel) → Synthesize → Refinement Loop → Store
 
-5. **Traceability Recording**: After generation, a `asset_traceability` record is created linking the asset to all its source inputs (pain points, documents, research, voice profile, prompt hash, model parameters).
+Generates three parallel perspectives (Practitioner Empathy, Competitive Positioning, Thought Leadership), then synthesizes the strongest elements into a single cohesive draft. The synthesized version IS the output — individual perspectives are not scored or compared.
 
-6. **Job Tracking**: The `generation_jobs` record is updated with completion status, token usage, and timing.
+### Shared Refinement Loop
 
-### Output
+All pipelines call `refinementLoop()` after their core generation logic:
 
-- `messaging_assets` rows with status `draft`
-- `asset_traceability` rows linking each asset to its sources
-- `generation_jobs` updated with completion status
+1. Score the current content against quality gates
+2. If gates pass, return immediately
+3. If slop score exceeds threshold, run deslop pass
+4. Build a refinement prompt targeting the specific failing dimensions
+5. Generate refined version
+6. If refined version scores lower (plateau), stop and keep current
+7. Otherwise, update content and repeat (up to 3 iterations)
 
-### Model Used
+This replaces the previous one-shot refine approach and the `pickBestResult()` pattern.
 
-- **Claude** for all messaging generation (superior at nuanced, voice-consistent writing)
+### Pipeline Step Events
 
-### Quality Checks
+Each pipeline emits step events via `emitPipelineStep()` for live UI streaming. Steps include: `extract-insights`, `research`, `generate`, `refine`, plus pipeline-specific steps like `pain-draft`, `attack-r1`, `defend-r1`, `synthesize`, etc. Events are stored in the `pipeline_steps` column of `generation_jobs`.
 
-- Generated content non-empty validation
-- Asset format compliance (required sections present for each asset type)
-- Voice profile vocabulary validation (no banned terms in output)
-- Minimum/maximum length enforcement per asset type
-- Traceability record completeness check
+### Removed
+
+- **Split Research Pipeline**: Removed — identical to Standard pipeline (both already run community + competitive research in parallel).
+- **`pickBestResult()` pattern**: Removed from all pipelines. Each pipeline now follows a sequential DAG where each step feeds the next.
+
 
 ---
 
@@ -378,7 +363,7 @@ Stage 3: Competitive Research
   Output: Structured Competitive Intelligence
 
 Stage 4: Messaging Generation
-  Model: Claude
+  Model: Gemini Pro (default), Claude (opt-in)
   Input:  Pain Points + Product Context + Research + Voice Profile
   Output: Draft Messaging Assets with Traceability
 

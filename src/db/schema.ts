@@ -74,6 +74,7 @@ export const generationJobs = sqliteTable('generation_jobs', {
   geminiInteractionId: text('gemini_interaction_id'),
   geminiStatus: text('gemini_status'),
   startedAt: text('started_at'),
+  pipelineSteps: text('pipeline_steps'), // JSON array of step events
   completedAt: text('completed_at'),
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),

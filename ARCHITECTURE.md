@@ -9,7 +9,7 @@ The system forks architectural patterns from two existing projects:
 - **o11y.tips** (`/root/o11y.tips`) — Provides the discovery pipeline pattern (community source ingestion, scoring, scheduling), the quality pipeline pattern (multi-dimension scoring, quality gates), and the admin UI scaffold (Vite + React + Tailwind dashboard).
 - **compintels** (`/root/compintels`) — Provides the competitive research pattern via Gemini Deep Research (async job submission, polling, structured result parsing).
 
-By combining these two proven patterns with Claude-powered messaging generation and a voice profile system, the engine produces messaging assets that are evidence-based, competitively informed, voice-consistent, and quality-scored.
+By combining these two proven patterns with Gemini Pro-powered messaging generation and a voice profile system, the engine produces messaging assets that are evidence-based, competitively informed, voice-consistent, and quality-scored.
 
 ## Data Flow
 
@@ -36,7 +36,7 @@ By combining these two proven patterns with Claude-powered messaging generation 
 +--------+---------+------+--------+-----------+--------------+----------+
 |                                                                        |
 |                    Stage 4: Messaging Generation                       |
-|                    (Claude)                                            |
+|                    (Gemini Pro, default; Claude opt-in)                    |
 |                                                                        |
 |   Pain Points + Product Context + Competitive Intel + Voice Profile    |
 |                           |                                            |
@@ -107,7 +107,7 @@ Adapted from the compintels project. Submits pain-point-focused research queries
 
 #### 4. Messaging Generation Service (`src/services/generation/`)
 
-The core generation engine. Takes a pain point, product context, competitive research, and a voice profile, then uses Claude to generate messaging assets. Supports multiple asset types (battlecard, talk track, launch messaging, social hook, one-pager, email copy). Each generation job is tracked with full input/output lineage for traceability.
+The core generation engine. Takes a pain point, product context, competitive research, and a voice profile, then uses Gemini Pro (default) or Claude (if selected by the user) to generate messaging assets. Supports multiple asset types (battlecard, talk track, launch messaging, social hook, one-pager, email copy). Each generation job is tracked with full input/output lineage for traceability.
 
 #### 5. Quality Pipeline Service (`src/services/quality/`)
 
@@ -136,9 +136,9 @@ SQLite database managed through Drizzle ORM. The schema consists of 14 tables co
 Abstraction layer for multi-model AI usage. Each model is wrapped in a client with retry logic, rate limiting, and structured output parsing:
 
 - `gemini-flash.ts` — Fast scoring operations
-- `gemini-pro.ts` — Slop detection and deslop rewrites
+- `gemini-pro.ts` — Default messaging generation, slop detection, and deslop rewrites
 - `gemini-deep-research.ts` — Competitive research (async)
-- `claude.ts` — Messaging generation
+- `claude.ts` — Messaging generation (opt-in alternative to Gemini Pro)
 
 ## Multi-Model AI Strategy
 
@@ -148,10 +148,10 @@ The engine uses a deliberate multi-model strategy, selecting each model for its 
 |-------|---------|----------------|
 | **Gemini Flash** | Pain point scoring, quality dimension scoring | Fast, cheap, good at structured numeric output. Ideal for high-volume scoring where latency matters. |
 | **Gemini Deep Research** | Competitive research | Unique capability — performs multi-step web research with source citations. No other model offers this as a built-in feature. |
-| **Gemini Pro** | Slop detection, deslop rewrites | Better at nuanced language quality assessment than Flash. Used for the "deslop" pass where a rewrite may be needed. |
-| **Claude** | Messaging generation | Superior at long-form, nuanced writing. Better at following complex voice profiles and producing natural-sounding marketing copy that avoids AI-typical patterns. |
+| **Gemini Pro** | Default messaging generation, slop detection, deslop rewrites | Primary generation model. Strong at nuanced writing, voice-consistent copy, and language quality assessment. Also handles deslop rewrites. |
+| **Claude** | Opt-in messaging generation (user-selectable per session) | Alternative generator available when explicitly selected in the UI. Superior at certain long-form writing tasks. |
 
-This strategy optimizes for cost (Flash for volume), capability (Deep Research for web research), quality (Pro for language assessment), and creativity (Claude for generation).
+This strategy optimizes for cost (Flash for volume), capability (Deep Research for web research), and quality/generation (Pro as the default generator and language assessor, with Claude available as an opt-in alternative).
 
 ## Database Overview
 
@@ -194,7 +194,7 @@ Voice profiles are a core concept that govern how messaging is generated and sco
 - **Quality gate thresholds** — Minimum scores per dimension that assets must meet for this voice
 - **Example snippets** — Reference text that exemplifies the desired voice
 
-During generation, the voice profile is injected into the Claude prompt so the output matches the desired tone and vocabulary. During scoring, the quality gates from the voice profile determine whether an asset passes or needs revision. This allows the same pain point to produce different messaging for different audiences (e.g., a developer-focused battlecard vs. an executive-focused one-pager) with appropriate quality bars for each.
+During generation, the voice profile is injected into the generation prompt so the output matches the desired tone and vocabulary. During scoring, the quality gates from the voice profile determine whether an asset passes or needs revision. This allows the same pain point to produce different messaging for different audiences (e.g., a developer-focused battlecard vs. an executive-focused one-pager) with appropriate quality bars for each.
 
 ## Traceability System (Killer Feature)
 
@@ -209,3 +209,18 @@ The traceability system is the defining feature of this engine. Every messaging 
 - **Edit history** — Any human edits made during review
 
 This means any stakeholder can click on a messaging asset and trace it all the way back to a real practitioner saying a real thing in a real community. This transforms messaging from "the PMM team thinks X" to "practitioners are saying X, and here's the evidence." It also enables gap analysis: the `messaging_gaps` table tracks pain points that have been discovered but lack adequate messaging coverage, surfacing opportunities for new content.
+
+## Pipeline Architecture (Updated Feb 2025)
+
+### Pipeline Variants
+Four pipelines are available, all sharing a common refinement loop:
+- **Standard**: Research → Generate → Refine
+- **Outside-In**: Community pain → Draft → Enrich competitively → Layer product → Refine
+- **Adversarial**: Draft → 2 rounds of Attack/Defend → Refine
+- **Multi-Perspective**: 3 parallel angles → Synthesize → Refine
+
+### Key Design Decisions
+- **Sequential DAG pattern**: Each pipeline step feeds the next. No `pickBestResult()` comparisons.
+- **Shared refinement loop**: Up to 3 iterations of score → deslop → refine → check plateau.
+- **Pipeline step events**: `emitPipelineStep()` writes progress to `generation_jobs.pipeline_steps` for live UI streaming.
+- **Split Research pipeline removed**: Was identical to Standard.

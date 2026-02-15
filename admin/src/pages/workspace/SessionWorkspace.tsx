@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api } from '../../api/client';
 import ChatPanel from './components/ChatPanel';
+import PipelineProgress from './components/PipelineProgress';
 
 function ScoreBadge({ label, value, threshold, inverted = false }: {
   label: string;
@@ -505,6 +506,7 @@ export default function SessionWorkspace() {
             </div>
             <p className="text-sm text-gray-400">You can navigate away — your session is saved.</p>
           </div>
+          <PipelineProgress sessionId={id!} isGenerating={true} />
           {painPoint && (
             <div className="mt-8 pt-6 border-t border-gray-200">
               <h3 className="text-sm font-medium text-gray-700 mb-2">Pain Point Reference</h3>

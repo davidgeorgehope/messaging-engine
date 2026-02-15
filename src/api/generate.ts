@@ -48,9 +48,6 @@ export interface EvidenceBundle {
   practitionerQuotes: PractitionerQuote[];
   communityContextText: string;
   evidenceLevel: 'strong' | 'partial' | 'product-only';
-  // strong: >= 3 community posts from >= 2 sources
-  // partial: >= 1 community post or grounded search results
-  // product-only: no community evidence found
   sourceCounts: Record<string, number>;
 }
 
@@ -238,6 +235,33 @@ async function loadJobInputs(jobId: string): Promise<JobInputs> {
 }
 
 // ---------------------------------------------------------------------------
+// Pipeline Step Events — for live streaming UI
+// ---------------------------------------------------------------------------
+
+function emitPipelineStep(jobId: string, step: string, status: 'running' | 'complete', data?: { draft?: string; scores?: any }) {
+  const db = getDatabase();
+  const job = db.select().from(generationJobs).where(eq(generationJobs.id, jobId)).get();
+  const steps = JSON.parse((job as any)?.pipelineSteps || '[]');
+
+  if (status === 'running') {
+    steps.push({ step, status, startedAt: new Date().toISOString() });
+  } else {
+    const existing = steps.findLast((s: any) => s.step === step);
+    if (existing) {
+      existing.status = 'complete';
+      existing.completedAt = new Date().toISOString();
+      if (data?.draft) existing.draft = data.draft.substring(0, 2000);
+      if (data?.scores) existing.scores = data.scores;
+    }
+  }
+
+  db.update(generationJobs)
+    .set({ pipelineSteps: JSON.stringify(steps), updatedAt: new Date().toISOString() })
+    .where(eq(generationJobs.id, jobId))
+    .run();
+}
+
+// ---------------------------------------------------------------------------
 // Community Deep Research — replaces inline grounded search + adapter calls
 // ---------------------------------------------------------------------------
 
@@ -343,43 +367,57 @@ async function runCompetitiveResearch(insights: ExtractedInsights, prompt?: stri
   return result.text;
 }
 
+// ---------------------------------------------------------------------------
+// Generate and Score (no refinement — that's handled by refinementLoop)
+// ---------------------------------------------------------------------------
+
 interface GenerateAndScoreResult {
   content: string;
   scores: ScoreResults;
   passesGates: boolean;
 }
 
-async function generateAndScoreVariant(
+async function generateAndScore(
   userPrompt: string,
   systemPrompt: string,
   model: string,
   scoringContext: string,
   thresholds: any,
-  voice: any,
-  assetType: AssetType,
-  jobId: string,
-  refine: boolean = true,
 ): Promise<GenerateAndScoreResult> {
   const response = await generateContent(userPrompt, {
     systemPrompt,
     temperature: 0.7,
   }, model);
 
-  let finalContent = response.text;
-  let scores = await scoreContent(finalContent, [scoringContext]);
-  let passesGates = checkGates(scores, thresholds);
+  const scores = await scoreContent(response.text, [scoringContext]);
+  const passesGates = checkGates(scores, thresholds);
 
-  if (refine && !passesGates) {
-    logger.info('Content failed gates, attempting refinement', {
-      jobId, assetType, voice: voice.name,
-      slop: scores.slopScore, vendor: scores.vendorSpeakScore,
-      auth: scores.authenticityScore, spec: scores.specificityScore,
-      persona: scores.personaAvgScore,
-    });
+  return { content: response.text, scores, passesGates };
+}
 
+// ---------------------------------------------------------------------------
+// Shared Refinement Loop — all pipelines call this at the end
+// ---------------------------------------------------------------------------
+
+async function refinementLoop(
+  content: string,
+  scoringContext: string,
+  thresholds: any,
+  voice: any,
+  assetType: AssetType,
+  systemPrompt: string,
+  model: string,
+  maxIterations: number = 3,
+): Promise<GenerateAndScoreResult> {
+  let scores = await scoreContent(content, [scoringContext]);
+
+  for (let i = 0; i < maxIterations; i++) {
+    if (checkGates(scores, thresholds)) break;
+
+    // Deslop if slop is high
     if (scores.slopScore > thresholds.slopMax) {
       try {
-        finalContent = await deslop(finalContent, scores.slopAnalysis);
+        content = await deslop(content, scores.slopAnalysis);
       } catch (deslopErr) {
         logger.warn('Deslop failed, continuing with original', {
           error: deslopErr instanceof Error ? deslopErr.message : String(deslopErr),
@@ -387,28 +425,33 @@ async function generateAndScoreVariant(
       }
     }
 
-    const refinementPrompt = buildRefinementPrompt(finalContent, scores, thresholds, voice, assetType);
+    // Build refinement prompt from failing scores
+    const refinementPrompt = buildRefinementPrompt(content, scores, thresholds, voice, assetType);
     try {
-      const refinedResponse = await generateContent(refinementPrompt, {
+      const refined = await generateContent(refinementPrompt, {
         systemPrompt,
         temperature: 0.5,
       }, model);
 
-      const refinedScores = await scoreContent(refinedResponse.text, [scoringContext]);
+      const newScores = await scoreContent(refined.text, [scoringContext]);
 
-      if (totalQualityScore(refinedScores) > totalQualityScore(scores)) {
-        finalContent = refinedResponse.text;
-        scores = refinedScores;
-        passesGates = checkGates(scores, thresholds);
+      // If no improvement, stop (plateau)
+      if (totalQualityScore(newScores) <= totalQualityScore(scores)) {
+        logger.info('Refinement plateau reached', { iteration: i, assetType, voice: voice.name });
+        break;
       }
+
+      content = refined.text;
+      scores = newScores;
     } catch (refineErr) {
-      logger.warn('Refinement generation failed, keeping original', {
+      logger.warn('Refinement generation failed, keeping current version', {
         error: refineErr instanceof Error ? refineErr.message : String(refineErr),
       });
+      break;
     }
   }
 
-  return { content: finalContent, scores, passesGates };
+  return { content, scores, passesGates: checkGates(scores, thresholds) };
 }
 
 async function storeVariant(
@@ -498,14 +541,8 @@ async function storeVariant(
   });
 }
 
-function pickBestResult(...results: GenerateAndScoreResult[]): GenerateAndScoreResult {
-  return results.reduce((best, current) =>
-    totalQualityScore(current.scores) > totalQualityScore(best.scores) ? current : best
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Pipeline: Standard (Research → Generate → Score → Refine)
+// Pipeline: Standard (Research → Generate → Refinement Loop → Store)
 // ---------------------------------------------------------------------------
 
 async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<void> {
@@ -513,15 +550,18 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
   const totalItems = selectedAssetTypes.length * selectedVoices.length;
   let completedItems = 0;
 
-  // Step 0: Extract insights once — single source of truth for all downstream uses
+  // Step 1: Extract insights
+  emitPipelineStep(jobId, 'extract-insights', 'running');
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
     logger.warn('Session naming failed', { jobId, error: err instanceof Error ? err.message : String(err) });
   });
   const scoringContext = formatInsightsForScoring(insights);
+  emitPipelineStep(jobId, 'extract-insights', 'complete');
 
-  // Step 1: Community Deep Research + Competitive Research in parallel
+  // Step 2: Community Deep Research + Competitive Research in parallel
+  emitPipelineStep(jobId, 'research', 'running');
   updateJobProgress(jobId, { currentStep: 'Running community & competitive research...', progress: 5 });
 
   const [evidence, competitiveResult] = await Promise.all([
@@ -540,7 +580,10 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
       ? `${researchContext}\n\n${evidence.communityContextText}`
       : evidence.communityContextText;
   }
+  emitPipelineStep(jobId, 'research', 'complete');
 
+  // Step 3-5: Generate → Refinement Loop → Store (per asset/voice)
+  emitPipelineStep(jobId, 'generate', 'running');
   updateJobProgress(jobId, { currentStep: 'Generating messaging...', progress: 18 });
 
   for (const assetType of selectedAssetTypes) {
@@ -553,7 +596,12 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
       const userPrompt = buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel);
 
       try {
-        const result = await generateAndScoreVariant(userPrompt, systemPrompt, selectedModel, scoringContext, thresholds, voice, assetType, jobId);
+        // Generate initial draft
+        const initial = await generateAndScore(userPrompt, systemPrompt, selectedModel, scoringContext, thresholds);
+
+        // Refinement loop (up to 3 iterations)
+        const result = await refinementLoop(initial.content, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
+
         await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence);
       } catch (error) {
         logger.error('Failed to generate variant', {
@@ -567,75 +615,12 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
     }
   }
 
+  emitPipelineStep(jobId, 'generate', 'complete');
   return finalizeJob(jobId, !!researchContext, researchContext.length);
 }
 
 // ---------------------------------------------------------------------------
-// Pipeline: Split Research (competitive + practitioner pain in parallel)
-// ---------------------------------------------------------------------------
-
-async function runSplitResearchPipeline(jobId: string, inputs: JobInputs): Promise<void> {
-  const { productDocs, existingMessaging, prompt, assetTypes: selectedAssetTypes, model: selectedModel, selectedVoices } = inputs;
-  const totalItems = selectedAssetTypes.length * selectedVoices.length;
-  let completedItems = 0;
-
-  // Step 0: Extract insights once — needed before parallel research streams
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
-  const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
-  await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
-    logger.warn('Session naming failed', { jobId, error: err instanceof Error ? err.message : String(err) });
-  });
-  const scoringContext = formatInsightsForScoring(insights);
-
-  updateJobProgress(jobId, { currentStep: 'Running community & competitive research...', progress: 5 });
-
-  // Parallel research streams: community Deep Research + competitive Deep Research
-  const [evidence, competitiveResult] = await Promise.all([
-    runCommunityDeepResearch(insights, prompt),
-    runCompetitiveResearch(insights, prompt).catch(err => {
-      logger.warn('Competitive research failed', { jobId, error: err instanceof Error ? err.message : String(err) });
-      return '';
-    }),
-  ]);
-
-  updateJobProgress(jobId, { currentStep: 'Combining research...', progress: 15 });
-
-  const enrichedResearch = [
-    competitiveResult ? `## Competitive Intelligence\n${competitiveResult}` : '',
-    evidence.communityContextText || '',
-  ].filter(Boolean).join('\n\n');
-
-  updateJobProgress(jobId, { currentStep: 'Generating messaging...', progress: 20 });
-
-  for (const assetType of selectedAssetTypes) {
-    const template = loadTemplate(assetType);
-    for (const voice of selectedVoices) {
-      updateJobProgress(jobId, { currentStep: `Generating ${ASSET_TYPE_LABELS[assetType]} — ${voice.name}` });
-
-      const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
-      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
-      const userPrompt = buildUserPrompt(existingMessaging, prompt, enrichedResearch, template, assetType, insights, evidence.evidenceLevel);
-
-      try {
-        const result = await generateAndScoreVariant(userPrompt, systemPrompt, selectedModel, scoringContext, thresholds, voice, assetType, jobId);
-        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence);
-      } catch (error) {
-        logger.error('Failed to generate variant', {
-          jobId, assetType, voice: voice.name,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-
-      completedItems++;
-      updateJobProgress(jobId, { progress: Math.min(Math.round(20 + (completedItems / totalItems) * 75), 95) });
-    }
-  }
-
-  return finalizeJob(jobId, !!(competitiveResult || evidence.communityContextText), (competitiveResult + evidence.communityContextText).length);
-}
-
-// ---------------------------------------------------------------------------
-// Pipeline: Outside-In (practitioner pain first, refine inward)
+// Pipeline: Outside-In (practitioner pain first, layered enrichment)
 // ---------------------------------------------------------------------------
 
 async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<void> {
@@ -643,17 +628,21 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
   const totalItems = selectedAssetTypes.length * selectedVoices.length;
   let completedItems = 0;
 
-  // Step 0: Extract insights once
+  // Step 1: Extract insights
+  emitPipelineStep(jobId, 'extract-insights', 'running');
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
     logger.warn('Session naming failed', { jobId, error: err instanceof Error ? err.message : String(err) });
   });
   const scoringContext = formatInsightsForScoring(insights);
+  emitPipelineStep(jobId, 'extract-insights', 'complete');
 
-  // Step 1: Community Deep Research — practitioner pain is the foundation
+  // Step 2: Community Deep Research — practitioner pain is the foundation
+  emitPipelineStep(jobId, 'community-research', 'running');
   updateJobProgress(jobId, { currentStep: 'Running community Deep Research...', progress: 5 });
   const evidence = await runCommunityDeepResearch(insights, prompt);
+  emitPipelineStep(jobId, 'community-research', 'complete');
 
   // Outside-in pipeline requires community evidence — it's the whole point
   if (evidence.evidenceLevel === 'product-only') {
@@ -664,7 +653,7 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
 
   const practitionerContext = evidence.communityContextText;
 
-  updateJobProgress(jobId, { currentStep: 'Generating pain-grounded draft...', progress: 15 });
+  updateJobProgress(jobId, { currentStep: 'Generating pain-grounded drafts...', progress: 15 });
 
   for (const assetType of selectedAssetTypes) {
     const template = loadTemplate(assetType);
@@ -673,59 +662,78 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
       const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
 
       try {
-        // Step 2: Generate pain-grounded first draft (minimal product detail)
+        // Step 3: Generate pain-grounded first draft
+        emitPipelineStep(jobId, `pain-draft-${assetType}-${voice.slug}`, 'running');
         updateJobProgress(jobId, { currentStep: `Generating pain-grounded draft — ${voice.name}` });
 
         const painFirstPrompt = buildPainFirstPrompt(practitionerContext, template, assetType, insights);
-        const firstDraft = await generateContent(painFirstPrompt, { systemPrompt, temperature: 0.7 }, selectedModel);
+        const firstDraftResponse = await generateContent(painFirstPrompt, { systemPrompt, temperature: 0.7 }, selectedModel);
+        emitPipelineStep(jobId, `pain-draft-${assetType}-${voice.slug}`, 'complete', { draft: firstDraftResponse.text });
 
-        // Step 3: Competitive research + score first draft in parallel
-        updateJobProgress(jobId, { currentStep: `Running competitive research & scoring — ${voice.name}` });
+        // Step 4: Competitive research (with draft context for targeting)
+        emitPipelineStep(jobId, `competitive-research-${assetType}-${voice.slug}`, 'running');
+        updateJobProgress(jobId, { currentStep: `Running competitive research — ${voice.name}` });
 
-        const [firstScores, competitiveContext] = await Promise.all([
-          scoreContent(firstDraft.text, [scoringContext]),
-          runCompetitiveResearch(insights, prompt).catch(() => ''),
-        ]);
+        const competitiveContext = await runCompetitiveResearch(insights, prompt).catch(() => '');
+        emitPipelineStep(jobId, `competitive-research-${assetType}-${voice.slug}`, 'complete');
 
-        // Step 4: Refine with full product context + competitive intel
-        updateJobProgress(jobId, { currentStep: `Refining with product context — ${voice.name}` });
+        // Step 5: Enrich draft with competitive intel
+        emitPipelineStep(jobId, `enrich-competitive-${assetType}-${voice.slug}`, 'running');
+        updateJobProgress(jobId, { currentStep: `Enriching with competitive intel — ${voice.name}` });
+
+        const enrichCompetitivePrompt = `Here's the practitioner-grounded draft. Here's competitive research. Update the draft to weave in competitive positioning WITHOUT losing the practitioner voice.
+
+## Practitioner-Grounded Draft
+${firstDraftResponse.text}
+
+## Competitive Research
+${competitiveContext.substring(0, 5000)}
+
+## Rules
+1. Keep the practitioner voice and pain-first structure
+2. Add competitive differentiation where it strengthens the narrative
+3. Don't add vendor-speak or marketing jargon
+4. If the competitive research reveals gaps competitors miss, highlight those
+5. Output ONLY the updated content`;
+
+        const enrichedResponse = await generateContent(enrichCompetitivePrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
+        emitPipelineStep(jobId, `enrich-competitive-${assetType}-${voice.slug}`, 'complete', { draft: enrichedResponse.text });
+
+        // Step 6: Layer in product specifics
+        emitPipelineStep(jobId, `layer-product-${assetType}-${voice.slug}`, 'running');
+        updateJobProgress(jobId, { currentStep: `Layering product specifics — ${voice.name}` });
 
         const productInsightsText = formatInsightsForPrompt(insights);
-        const refinePrompt = `Refine this ${assetType.replace(/_/g, ' ')} by layering in product specifics and competitive context.
+        const layerProductPrompt = `Here's the competitively-enriched draft. Here's detailed product intelligence. Add specific product capabilities, metrics, and claims where they strengthen the narrative. Don't vendor-speak it.
 
-## CRITICAL RULE: Don't lose the practitioner voice
-The first draft below was written from pure practitioner pain. It sounds authentic. Your job is to ADD specifics and competitive edge WITHOUT losing that voice. If in doubt, keep the practitioner language.
+## Competitively-Enriched Draft
+${enrichedResponse.text}
 
-## First Draft (pain-grounded)
-${firstDraft.text}
-
-## Product Intelligence (add specifics from here)
+## Product Intelligence
 ${productInsightsText}
-
-${competitiveContext ? `## Competitive Intelligence (weave in positioning)\n${competitiveContext.substring(0, 4000)}` : ''}
 
 ## Template / Format Guide
 ${template}
 
-Rewrite with the product specifics and competitive positioning woven in naturally. Keep the pain-first structure. Output ONLY the refined content.`;
+## Rules
+1. Add specific product capabilities, metrics, and claims where they strengthen the narrative
+2. Don't turn it into a feature list — weave product specifics in naturally
+3. Keep the practitioner voice dominant
+4. Every product mention should answer "so what?" for the practitioner
+5. Output ONLY the final content`;
 
-        const refinedResponse = await generateContent(refinePrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
-        const refinedScores = await scoreContent(refinedResponse.text, [scoringContext]);
+        const layeredResponse = await generateContent(layerProductPrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
+        emitPipelineStep(jobId, `layer-product-${assetType}-${voice.slug}`, 'complete', { draft: layeredResponse.text });
 
-        // Keep best version
-        const firstResult: GenerateAndScoreResult = {
-          content: firstDraft.text,
-          scores: firstScores,
-          passesGates: checkGates(firstScores, thresholds),
-        };
-        const refinedResult: GenerateAndScoreResult = {
-          content: refinedResponse.text,
-          scores: refinedScores,
-          passesGates: checkGates(refinedScores, thresholds),
-        };
+        // Step 7: Refinement loop
+        emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'running');
+        updateJobProgress(jobId, { currentStep: `Refining — ${voice.name}` });
 
-        const best = pickBestResult(firstResult, refinedResult);
-        await storeVariant(jobId, assetType, voice, best.content, best.scores, best.passesGates, prompt, evidence);
+        const result = await refinementLoop(layeredResponse.text, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
+        emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores });
+
+        // Step 8: Store
+        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence);
       } catch (error) {
         logger.error('Failed to generate variant', {
           jobId, assetType, voice: voice.name,
@@ -777,7 +785,7 @@ Minimal product mentions. Maximum practitioner empathy. Output ONLY the content.
 }
 
 // ---------------------------------------------------------------------------
-// Pipeline: Adversarial (generate, attack, defend, finalize)
+// Pipeline: Adversarial (generate, 2 rounds attack/defend, refinement loop)
 // ---------------------------------------------------------------------------
 
 async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise<void> {
@@ -785,15 +793,18 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
   const totalItems = selectedAssetTypes.length * selectedVoices.length;
   let completedItems = 0;
 
-  // Step 0: Extract insights once
+  // Step 1: Extract insights
+  emitPipelineStep(jobId, 'extract-insights', 'running');
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
     logger.warn('Session naming failed', { jobId, error: err instanceof Error ? err.message : String(err) });
   });
   const scoringContext = formatInsightsForScoring(insights);
+  emitPipelineStep(jobId, 'extract-insights', 'complete');
 
-  // Step 1: Community Deep Research + Competitive Research in parallel
+  // Step 2: Community Deep Research + Competitive Research in parallel
+  emitPipelineStep(jobId, 'research', 'running');
   updateJobProgress(jobId, { currentStep: 'Running community & competitive research...', progress: 5 });
 
   const [evidence, competitiveResult] = await Promise.all([
@@ -810,6 +821,7 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
       ? `${researchContext}\n\n${evidence.communityContextText}`
       : evidence.communityContextText;
   }
+  emitPipelineStep(jobId, 'research', 'complete');
 
   updateJobProgress(jobId, { currentStep: 'Generating initial drafts...', progress: 18 });
 
@@ -819,22 +831,28 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
       const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
       const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
       const userPrompt = buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel);
+      const productInsightsText = formatInsightsForPrompt(insights);
 
       try {
-        // Step 2: Generate initial draft
+        // Step 3: Generate initial draft
+        emitPipelineStep(jobId, `draft-${assetType}-${voice.slug}`, 'running');
         updateJobProgress(jobId, { currentStep: `Generating initial draft — ${voice.name}` });
         const initialResponse = await generateContent(userPrompt, { systemPrompt, temperature: 0.7 }, selectedModel);
-        const initialScores = await scoreContent(initialResponse.text, [scoringContext]);
+        let currentContent = initialResponse.text;
+        emitPipelineStep(jobId, `draft-${assetType}-${voice.slug}`, 'complete', { draft: currentContent });
 
-        // Step 3: Attack — hostile skeptical practitioner tears it apart
-        updateJobProgress(jobId, { currentStep: `Running adversarial critique — ${voice.name}` });
+        // Two rounds of attack/defend
+        for (let round = 1; round <= 2; round++) {
+          // Attack
+          emitPipelineStep(jobId, `attack-r${round}-${assetType}-${voice.slug}`, 'running');
+          updateJobProgress(jobId, { currentStep: `Adversarial attack round ${round} — ${voice.name}` });
 
-        const attackPrompt = `You are a hostile, skeptical senior practitioner reviewing vendor messaging. You've been burned by every vendor promise in the last decade. You hate buzzwords, vague claims, and anything that sounds like it was written by someone who has never been on-call.
+          const attackPrompt = `You are a hostile, skeptical senior practitioner reviewing vendor messaging. You've been burned by every vendor promise in the last decade. You hate buzzwords, vague claims, and anything that sounds like it was written by someone who has never been on-call.
 
 Tear apart this ${assetType.replace(/_/g, ' ')} messaging. Be ruthless but specific:
 
 ## Messaging to Attack
-${initialResponse.text}
+${currentContent}
 
 ## Your Critique Should Cover
 1. **Unsubstantiated Claims**: What claims have zero evidence? What would you need to see to believe them?
@@ -846,19 +864,20 @@ ${initialResponse.text}
 
 Be brutal. Every weakness you find makes the final output stronger. Format as a numbered list of specific attacks.`;
 
-        const attackResponse = await generateWithGemini(attackPrompt, {
-          model: config.ai.gemini.proModel,
-          temperature: 0.6,
-        });
+          const attackResponse = await generateWithGemini(attackPrompt, {
+            model: config.ai.gemini.proModel,
+            temperature: 0.6,
+          });
+          emitPipelineStep(jobId, `attack-r${round}-${assetType}-${voice.slug}`, 'complete');
 
-        // Step 4: Defend — rewrite to survive the attacks
-        updateJobProgress(jobId, { currentStep: `Rewriting to survive objections — ${voice.name}` });
+          // Defend
+          emitPipelineStep(jobId, `defend-r${round}-${assetType}-${voice.slug}`, 'running');
+          updateJobProgress(jobId, { currentStep: `Defending round ${round} — ${voice.name}` });
 
-        const productInsightsText = formatInsightsForPrompt(insights);
-        const defendPrompt = `Your ${assetType.replace(/_/g, ' ')} messaging was attacked by a skeptical practitioner. Rewrite it to survive every objection.
+          const defendPrompt = `Your ${assetType.replace(/_/g, ' ')} messaging was attacked by a skeptical practitioner. Rewrite it to survive every objection.
 
-## Original Messaging
-${initialResponse.text}
+## Current Messaging
+${currentContent}
 
 ## Practitioner Attacks
 ${attackResponse.text}
@@ -879,23 +898,19 @@ ${template}
 
 Output ONLY the rewritten content. No meta-commentary.`;
 
-        const defendedResponse = await generateContent(defendPrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
-        const defendedScores = await scoreContent(defendedResponse.text, [scoringContext]);
+          const defendedResponse = await generateContent(defendPrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
+          currentContent = defendedResponse.text;
+          emitPipelineStep(jobId, `defend-r${round}-${assetType}-${voice.slug}`, 'complete', { draft: currentContent });
+        }
 
-        // Keep best version
-        const initialResult: GenerateAndScoreResult = {
-          content: initialResponse.text,
-          scores: initialScores,
-          passesGates: checkGates(initialScores, thresholds),
-        };
-        const defendedResult: GenerateAndScoreResult = {
-          content: defendedResponse.text,
-          scores: defendedScores,
-          passesGates: checkGates(defendedScores, thresholds),
-        };
+        // Step 6: Refinement loop
+        emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'running');
+        updateJobProgress(jobId, { currentStep: `Refining — ${voice.name}` });
+        const result = await refinementLoop(currentContent, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
+        emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores });
 
-        const best = pickBestResult(initialResult, defendedResult);
-        await storeVariant(jobId, assetType, voice, best.content, best.scores, best.passesGates, prompt, evidence);
+        // Step 7: Store
+        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence);
       } catch (error) {
         logger.error('Failed to generate variant', {
           jobId, assetType, voice: voice.name,
@@ -912,7 +927,7 @@ Output ONLY the rewritten content. No meta-commentary.`;
 }
 
 // ---------------------------------------------------------------------------
-// Pipeline: Multi-Perspective (3 angles, synthesize best)
+// Pipeline: Multi-Perspective (3 angles → synthesize → refinement loop)
 // ---------------------------------------------------------------------------
 
 async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Promise<void> {
@@ -920,15 +935,18 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
   const totalItems = selectedAssetTypes.length * selectedVoices.length;
   let completedItems = 0;
 
-  // Step 0: Extract insights once
+  // Step 1: Extract insights
+  emitPipelineStep(jobId, 'extract-insights', 'running');
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
     logger.warn('Session naming failed', { jobId, error: err instanceof Error ? err.message : String(err) });
   });
   const scoringContext = formatInsightsForScoring(insights);
+  emitPipelineStep(jobId, 'extract-insights', 'complete');
 
-  // Step 1: Community Deep Research + Competitive Research in parallel
+  // Step 2: Community Deep Research + Competitive Research in parallel
+  emitPipelineStep(jobId, 'research', 'running');
   updateJobProgress(jobId, { currentStep: 'Running community & competitive research...', progress: 5 });
 
   const [evidence, competitiveResult] = await Promise.all([
@@ -945,6 +963,7 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
       ? `${researchContext}\n\n${evidence.communityContextText}`
       : evidence.communityContextText;
   }
+  emitPipelineStep(jobId, 'research', 'complete');
 
   updateJobProgress(jobId, { currentStep: 'Generating from multiple perspectives...', progress: 18 });
 
@@ -955,7 +974,7 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
       const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
 
       try {
-        // Step 2: Generate 3 perspectives in parallel
+        // Step 3: Generate 3 perspectives in parallel
         const baseContext = buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel);
 
         const empathyAngle = `${baseContext}
@@ -973,6 +992,7 @@ Lead with what current alternatives FAIL at. The reader should recognize the spe
 ## PERSPECTIVE: Thought Leadership
 Lead with the industry's broken promise — the thing everyone was told would work but doesn't. Frame the problem as systemic, not just a tooling gap. Then present a different way of thinking about it. This should read like an opinionated blog post by someone who's seen the patterns across hundreds of teams.`;
 
+        emitPipelineStep(jobId, `perspectives-${assetType}-${voice.slug}`, 'running');
         updateJobProgress(jobId, { currentStep: `Generating 3 perspectives — ${voice.name}` });
 
         const [empathyRes, competitiveRes, thoughtRes] = await Promise.all([
@@ -980,8 +1000,10 @@ Lead with the industry's broken promise — the thing everyone was told would wo
           generateContent(competitiveAngle, { systemPrompt, temperature: 0.7 }, selectedModel),
           generateContent(thoughtLeadershipAngle, { systemPrompt, temperature: 0.7 }, selectedModel),
         ]);
+        emitPipelineStep(jobId, `perspectives-${assetType}-${voice.slug}`, 'complete');
 
-        // Step 3: Synthesize the best elements
+        // Step 4: Synthesize best elements into one draft
+        emitPipelineStep(jobId, `synthesize-${assetType}-${voice.slug}`, 'running');
         updateJobProgress(jobId, { currentStep: `Synthesizing best elements — ${voice.name}` });
 
         const synthesizePrompt = `You have 3 versions of the same ${assetType.replace(/_/g, ' ')}, each written from a different angle. Take the strongest elements from each and synthesize them into one superior version.
@@ -1009,24 +1031,16 @@ ${template}
 Output ONLY the synthesized content. No meta-commentary.`;
 
         const synthesizedResponse = await generateContent(synthesizePrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
+        emitPipelineStep(jobId, `synthesize-${assetType}-${voice.slug}`, 'complete', { draft: synthesizedResponse.text });
 
-        // Step 4: Score all 4 versions, keep the best
-        const [empathyScores, competitiveScores, thoughtScores, synthesizedScores] = await Promise.all([
-          scoreContent(empathyRes.text, [scoringContext]),
-          scoreContent(competitiveRes.text, [scoringContext]),
-          scoreContent(thoughtRes.text, [scoringContext]),
-          scoreContent(synthesizedResponse.text, [scoringContext]),
-        ]);
+        // Step 5: Refinement loop on the synthesized output
+        emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'running');
+        updateJobProgress(jobId, { currentStep: `Refining — ${voice.name}` });
+        const result = await refinementLoop(synthesizedResponse.text, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
+        emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores });
 
-        const candidates: GenerateAndScoreResult[] = [
-          { content: empathyRes.text, scores: empathyScores, passesGates: checkGates(empathyScores, thresholds) },
-          { content: competitiveRes.text, scores: competitiveScores, passesGates: checkGates(competitiveScores, thresholds) },
-          { content: thoughtRes.text, scores: thoughtScores, passesGates: checkGates(thoughtScores, thresholds) },
-          { content: synthesizedResponse.text, scores: synthesizedScores, passesGates: checkGates(synthesizedScores, thresholds) },
-        ];
-
-        const best = pickBestResult(...candidates);
-        await storeVariant(jobId, assetType, voice, best.content, best.scores, best.passesGates, prompt, evidence);
+        // Step 6: Store
+        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence);
       } catch (error) {
         logger.error('Failed to generate variant', {
           jobId, assetType, voice: voice.name,
@@ -1068,7 +1082,6 @@ async function finalizeJob(jobId: string, researchAvailable: boolean, researchLe
 
 const PIPELINE_RUNNERS: Record<string, (jobId: string, inputs: JobInputs) => Promise<void>> = {
   standard: runStandardPipeline,
-  'split-research': runSplitResearchPipeline,
   'outside-in': runOutsideInPipeline,
   adversarial: runAdversarialPipeline,
   'multi-perspective': runMultiPerspectivePipeline,
