@@ -106,7 +106,7 @@ export default function PipelineProgress({ sessionId, isGenerating }: Props) {
                   </span>
                   {s.model && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 font-mono">
-                      {s.model.replace("gemini-", "").replace("-preview", "")}
+                      {s.model.replace("-preview", "")}
                     </span>
                   )}
                   {hasScores && (
