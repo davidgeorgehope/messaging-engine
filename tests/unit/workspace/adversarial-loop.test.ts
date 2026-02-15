@@ -141,11 +141,18 @@ const failingScores = {
 
 const thresholds = { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6 };
 
-function setupActiveVersion(content = 'original content') {
+function setupActiveVersion(content = 'original content', scores?: any) {
   // getActiveVersion: findMany returns versions, find the active one
   mockFindMany
-    .mockResolvedValueOnce([{ id: 'v1', versionNumber: 1, isActive: true, content }])  // getActiveVersion query
-    ;
+    .mockResolvedValueOnce([{
+      id: 'v1', versionNumber: 1, isActive: true, content,
+      slopScore: scores?.slopScore ?? null,
+      vendorSpeakScore: scores?.vendorSpeakScore ?? null,
+      authenticityScore: scores?.authenticityScore ?? null,
+      specificityScore: scores?.specificityScore ?? null,
+      personaAvgScore: scores?.personaAvgScore ?? null,
+      passesGates: false,
+    }]);
   // loadSessionThresholds: findFirst returns session, then voice
   mockFindFirst
     .mockResolvedValueOnce({ id: 's1', voiceProfileId: 'vp1' })  // session
@@ -172,73 +179,62 @@ describe('runAdversarialLoopAction', () => {
     mockGenerateWithGemini.mockResolvedValue({ text: 'refined content', usage: { totalTokens: 50 } });
   });
 
-  it('terminates immediately when gates pass on first score', async () => {
+  it('returns null version when content is unchanged after elevation attempt', async () => {
     setupActiveVersion();
     mockScoreContent.mockResolvedValue(passingScores);
     mockCheckQualityGates.mockReturnValue(true);
-    setupCreateVersionAndActivate();
+    // Elevation generates, but totalQualityScore stays the same → stops
+    mockTotalQualityScore.mockReturnValue(30);
+    // generateWithGemini returns same content as original
+    mockGenerateWithGemini.mockResolvedValue({ text: 'original content', usage: { totalTokens: 50 } });
 
-    await runAdversarialLoopAction('s1', 'battlecard');
+    const result = await runAdversarialLoopAction('s1', 'battlecard');
 
-    // scoreContent called once (initial), no iterations
-    expect(mockScoreContent).toHaveBeenCalledTimes(1);
-    expect(mockDeslop).not.toHaveBeenCalled();
-    expect(mockGenerateWithGemini).not.toHaveBeenCalled();
-
-    // Version stored with iterations: 0
-    expect(mockInsertValues).toHaveBeenCalledWith(
-      expect.objectContaining({
-        source: 'adversarial',
-        sourceDetail: expect.stringContaining('"iterations":0'),
-      })
-    );
+    // Version is null because content didn't change
+    expect(result.version).toBeNull();
+    expect(result.previousScores).toBeDefined();
   });
 
-  it('runs max 3 iterations when gates never pass', async () => {
+  it('stops when totalQualityScore does not improve', async () => {
     setupActiveVersion();
     mockScoreContent.mockResolvedValue(failingScores);
     mockCheckQualityGates.mockReturnValue(false);
+    // Score stays same — should stop after first iteration
+    mockTotalQualityScore.mockReturnValue(15);
     setupCreateVersionAndActivate();
 
-    await runAdversarialLoopAction('s1', 'battlecard');
+    const result = await runAdversarialLoopAction('s1', 'battlecard');
 
-    // 1 initial + 3 re-scores = 4 total calls
-    expect(mockScoreContent).toHaveBeenCalledTimes(4);
-
-    // Version stored with iterations: 3
-    expect(mockInsertValues).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sourceDetail: expect.stringContaining('"iterations":3'),
-      })
-    );
+    // 1 initial + 1 re-score after iteration 0 = 2 total
+    expect(mockScoreContent).toHaveBeenCalledTimes(2);
+    // Version created because content changed (refined content ≠ original content)
+    expect(result.version).toBeDefined();
+    expect(result.previousScores).toBeDefined();
   });
 
-  it('terminates early when gates pass mid-loop', async () => {
+  it('continues improving when totalQualityScore increases', async () => {
     setupActiveVersion();
-    // First score fails, second (after 1 iteration) passes
-    mockScoreContent
-      .mockResolvedValueOnce(failingScores)   // initial
-      .mockResolvedValueOnce(passingScores);  // after iteration 1
-    mockCheckQualityGates
-      .mockReturnValueOnce(false)   // initial check
-      .mockReturnValueOnce(true);   // after iteration 1
+    mockScoreContent.mockResolvedValue(failingScores);
+    mockCheckQualityGates.mockReturnValue(false);
+    // Score improves each iteration → runs all 3
+    mockTotalQualityScore
+      .mockReturnValueOnce(10)   // initial bestScore
+      .mockReturnValueOnce(15)   // after iteration 0 — improved
+      .mockReturnValueOnce(20)   // after iteration 1 — improved
+      .mockReturnValueOnce(25);  // after iteration 2 — improved
     setupCreateVersionAndActivate();
 
     await runAdversarialLoopAction('s1', 'battlecard');
 
-    // 1 initial + 1 re-score = 2 total
-    expect(mockScoreContent).toHaveBeenCalledTimes(2);
-    expect(mockInsertValues).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sourceDetail: expect.stringContaining('"iterations":1'),
-      })
-    );
+    // 1 initial + 3 re-scores = 4 total
+    expect(mockScoreContent).toHaveBeenCalledTimes(4);
   });
 
   it('breaks on generateWithGemini error', async () => {
     setupActiveVersion();
     mockScoreContent.mockResolvedValue(failingScores);
     mockCheckQualityGates.mockReturnValue(false);
+    mockTotalQualityScore.mockReturnValue(10);
     mockGenerateWithGemini.mockRejectedValue(new Error('API failed'));
     setupCreateVersionAndActivate();
 
@@ -262,6 +258,9 @@ describe('runAdversarialLoopAction', () => {
     mockCheckQualityGates
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(true);
+    mockTotalQualityScore
+      .mockReturnValueOnce(10)   // initial
+      .mockReturnValueOnce(30);  // improved
     setupCreateVersionAndActivate();
 
     await runAdversarialLoopAction('s1', 'battlecard');
@@ -277,6 +276,9 @@ describe('runAdversarialLoopAction', () => {
     mockCheckQualityGates
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(true);
+    mockTotalQualityScore
+      .mockReturnValueOnce(10)
+      .mockReturnValueOnce(30);
     setupCreateVersionAndActivate();
 
     await runAdversarialLoopAction('s1', 'battlecard');
@@ -284,21 +286,22 @@ describe('runAdversarialLoopAction', () => {
     expect(mockDeslop).toHaveBeenCalledWith('original content', failingScores.slopAnalysis);
   });
 
-  it('creates version with correct source and sourceDetail', async () => {
-    setupActiveVersion();
-    mockScoreContent.mockResolvedValue(passingScores);
-    mockCheckQualityGates.mockReturnValue(true);
+  it('creates version with correct source and returns previousScores', async () => {
+    setupActiveVersion('original content', failingScores);
+    mockScoreContent.mockResolvedValue(failingScores);
+    mockCheckQualityGates.mockReturnValue(false);
+    mockTotalQualityScore.mockReturnValue(15);
     setupCreateVersionAndActivate();
 
-    await runAdversarialLoopAction('s1', 'battlecard');
+    const result = await runAdversarialLoopAction('s1', 'battlecard');
 
     expect(mockInsertValues).toHaveBeenCalledWith(
       expect.objectContaining({
         source: 'adversarial',
       })
     );
+    expect(result.previousScores).toBeDefined();
     const sourceDetail = JSON.parse(mockInsertValues.mock.calls[0][0].sourceDetail);
-    expect(sourceDetail).toHaveProperty('iterations');
     expect(sourceDetail).toHaveProperty('finalScores');
   });
 });

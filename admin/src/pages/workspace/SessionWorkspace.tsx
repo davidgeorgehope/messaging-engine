@@ -33,6 +33,70 @@ function ScoreBadge({ label, value, threshold, inverted = false }: {
   );
 }
 
+interface ScoreDelta {
+  actionName: string;
+  previous: { slop: number | null; vendorSpeak: number | null; authenticity: number | null; specificity: number | null; persona: number | null; passesGates: boolean } | null;
+  current: { slop: number | null; vendorSpeak: number | null; authenticity: number | null; specificity: number | null; persona: number | null; passesGates: boolean } | null;
+  message?: string;
+}
+
+function DeltaValue({ label, prev, curr, inverted = false }: { label: string; prev: number | null; curr: number | null; inverted?: boolean }) {
+  if (prev === null || curr === null) return null;
+  const diff = curr - prev;
+  if (Math.abs(diff) < 0.05) return null;
+  // For inverted scores (slop, vendor), lower is better
+  const improved = inverted ? diff < 0 : diff > 0;
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded font-medium ${
+      improved ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+    }`}>
+      {label}: {prev.toFixed(1)} {'\u2192'} {curr.toFixed(1)}
+      <span className="text-[10px]">({diff > 0 ? '+' : ''}{diff.toFixed(1)})</span>
+    </span>
+  );
+}
+
+function ScoreDeltaBanner({ delta, onDismiss }: { delta: ScoreDelta; onDismiss: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onDismiss, 15000);
+    return () => clearTimeout(timer);
+  }, [onDismiss]);
+
+  if (delta.message) {
+    return (
+      <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md text-yellow-800 text-sm flex items-center justify-between">
+        <span>{delta.message}</span>
+        <button onClick={onDismiss} className="ml-2 text-yellow-600 hover:text-yellow-800">x</button>
+      </div>
+    );
+  }
+
+  if (!delta.previous || !delta.current) return null;
+
+  const gateChanged = delta.previous.passesGates !== delta.current.passesGates;
+
+  return (
+    <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md text-sm">
+      <div className="flex items-center justify-between mb-2">
+        <span className="font-medium text-blue-900">{delta.actionName} — Score Changes</span>
+        <button onClick={onDismiss} className="text-blue-400 hover:text-blue-600">x</button>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <DeltaValue label="Slop" prev={delta.previous.slop} curr={delta.current.slop} inverted />
+        <DeltaValue label="Vendor" prev={delta.previous.vendorSpeak} curr={delta.current.vendorSpeak} inverted />
+        <DeltaValue label="Auth" prev={delta.previous.authenticity} curr={delta.current.authenticity} />
+        <DeltaValue label="Spec" prev={delta.previous.specificity} curr={delta.current.specificity} />
+        <DeltaValue label="Persona" prev={delta.previous.persona} curr={delta.current.persona} />
+      </div>
+      {gateChanged && (
+        <div className={`mt-2 text-xs font-medium ${delta.current.passesGates ? 'text-green-700' : 'text-red-700'}`}>
+          {delta.current.passesGates ? 'Now passes quality gates' : 'No longer passes quality gates'}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function stripMarkdown(md: string): string {
   return md
     .replace(/#{1,6}\s+/g, '')
@@ -69,6 +133,7 @@ export default function SessionWorkspace() {
   const [saving, setSaving] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState('');
   const [actionRunning, setActionRunning] = useState('');
+  const [scoreDelta, setScoreDelta] = useState<ScoreDelta | null>(null);
   const [voices, setVoices] = useState<any[]>([]);
   const [showVoiceDropdown, setShowVoiceDropdown] = useState(false);
   const [showChat, setShowChat] = useState(false);
@@ -186,8 +251,26 @@ export default function SessionWorkspace() {
   const runAction = async (actionName: string, actionFn: () => Promise<any>) => {
     setActionRunning(actionName);
     setError('');
+    setScoreDelta(null);
     try {
-      await actionFn();
+      const result = await actionFn();
+      const previousScores = result.previousScores || null;
+
+      if (!result.version && result.message) {
+        // Adversarial no-change case
+        setScoreDelta({ actionName, previous: previousScores, current: previousScores, message: result.message });
+      } else if (result.version && previousScores) {
+        const currentScores = {
+          slop: result.version.slopScore,
+          vendorSpeak: result.version.vendorSpeakScore,
+          authenticity: result.version.authenticityScore,
+          specificity: result.version.specificityScore,
+          persona: result.version.personaAvgScore,
+          passesGates: !!result.version.passesGates,
+        };
+        setScoreDelta({ actionName, previous: previousScores, current: currentScores });
+      }
+
       await loadSession();
     } catch (err: any) {
       setError(`${actionName} failed: ${err.message}`);
@@ -203,6 +286,7 @@ export default function SessionWorkspace() {
     setShowVoiceDropdown(false);
     runAction('Voice Change', () => api.runVoiceChange(id!, activeTab, voiceId));
   };
+  const handleMultiPerspective = () => runAction('Multi-Perspective', () => api.runMultiPerspective(id!, activeTab));
   const handleCompetitiveDive = () => runAction('Competitive Dive', () => api.runCompetitiveDive(id!, activeTab));
   const handleCommunityCheck = () => runAction('Community Check', () => api.runCommunityCheck(id!, activeTab));
 
@@ -523,6 +607,11 @@ export default function SessionWorkspace() {
             </div>
           )}
 
+          {/* Score delta banner */}
+          {scoreDelta && !isEditing && (
+            <ScoreDeltaBanner delta={scoreDelta} onDismiss={() => setScoreDelta(null)} />
+          )}
+
           {/* Action bar */}
           {!isEditing && displayContent && (
             <div className="flex items-center gap-2 mb-4 pb-4 border-b border-gray-100">
@@ -570,6 +659,13 @@ export default function SessionWorkspace() {
               >
                 {actionRunning === 'Adversarial' ? 'Running...' : 'Adversarial Loop'}
               </button>
+              <button
+                onClick={handleMultiPerspective}
+                disabled={!!actionRunning}
+                className="text-xs px-3 py-1.5 bg-cyan-50 text-cyan-700 hover:bg-cyan-100 rounded-md transition-colors disabled:opacity-50"
+              >
+                {actionRunning === 'Multi-Perspective' ? 'Running...' : 'Multi-Perspective'}
+              </button>
               <div className="border-l border-gray-200 h-4 mx-1" />
               <span className="text-xs text-gray-400 mr-2">Research:</span>
               <button
@@ -603,7 +699,7 @@ export default function SessionWorkspace() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                   </svg>
-                  {actionRunning === 'Competitive Dive' || actionRunning === 'Community Check' ? 'This may take 1-2 minutes...' : 'Processing...'}
+                  {actionRunning === 'Competitive Dive' || actionRunning === 'Community Check' ? 'This may take 1-2 minutes...' : actionRunning === 'Multi-Perspective' ? 'Generating 3 perspectives + synthesis...' : 'Processing...'}
                 </span>
               )}
             </div>

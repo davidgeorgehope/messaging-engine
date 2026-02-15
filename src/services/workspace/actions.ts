@@ -27,6 +27,30 @@ import {
 
 const logger = createLogger('workspace:actions');
 
+export interface ActionResult {
+  version: any;
+  previousScores: {
+    slop: number | null;
+    vendorSpeak: number | null;
+    authenticity: number | null;
+    specificity: number | null;
+    persona: number | null;
+    passesGates: boolean;
+  } | null;
+}
+
+function extractPreviousScores(active: any): ActionResult['previousScores'] {
+  if (!active || active.slopScore === null) return null;
+  return {
+    slop: active.slopScore,
+    vendorSpeak: active.vendorSpeakScore,
+    authenticity: active.authenticityScore,
+    specificity: active.specificityScore,
+    persona: active.personaAvgScore,
+    passesGates: !!active.passesGates,
+  };
+}
+
 async function getActiveVersion(sessionId: string, assetType: string) {
   const db = getDatabase();
   const versions = await db.query.sessionVersions.findMany({
@@ -181,10 +205,11 @@ Output ONLY the enriched content.`;
 /**
  * Run deslop on the active version of an asset type.
  */
-export async function runDeslopAction(sessionId: string, assetType: string) {
+export async function runDeslopAction(sessionId: string, assetType: string): Promise<ActionResult> {
   const active = await getActiveVersion(sessionId, assetType);
   if (!active) throw new Error('No active version to deslop');
 
+  const previousScores = extractPreviousScores(active);
   logger.info('Running deslop action', { sessionId, assetType });
 
   const slopAnalysis = await analyzeSlop(active.content);
@@ -192,10 +217,11 @@ export async function runDeslopAction(sessionId: string, assetType: string) {
   const scores = await scoreContent(deslopped);
   const thresholds = await loadSessionThresholds(sessionId);
 
-  return createVersionAndActivate(sessionId, assetType, deslopped, 'deslop', {
+  const version = await createVersionAndActivate(sessionId, assetType, deslopped, 'deslop', {
     previousVersion: active.versionNumber,
     slopAnalysis,
   }, scores, thresholds);
+  return { version, previousScores };
 }
 
 /**
@@ -203,7 +229,7 @@ export async function runDeslopAction(sessionId: string, assetType: string) {
  * voice profile, template, competitive research, evidence grounding, and
  * refinement loop — matching the quality of the original generation pipeline.
  */
-export async function runRegenerateAction(sessionId: string, assetType: string) {
+export async function runRegenerateAction(sessionId: string, assetType: string): Promise<ActionResult> {
   const db = getDatabase();
   const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
   if (!session) throw new Error('Session not found');
@@ -238,6 +264,7 @@ export async function runRegenerateAction(sessionId: string, assetType: string) 
 
   // Get existing content as reference for the regeneration
   const active = await getActiveVersion(sessionId, assetType);
+  const previousScores = extractPreviousScores(active);
   const existingMessaging = active?.content;
 
   // Determine evidence level — regeneration uses product-only since we don't re-run
@@ -307,22 +334,24 @@ export async function runRegenerateAction(sessionId: string, assetType: string) 
     }
   }
 
-  return createVersionAndActivate(sessionId, assetType, finalContent, 'regenerate', {
+  const version = await createVersionAndActivate(sessionId, assetType, finalContent, 'regenerate', {
     regeneratedAt: new Date().toISOString(),
     voiceProfileId: voice.id,
     voiceName: voice.name,
     evidenceLevel,
     refined: !passesGates ? false : undefined,
   }, scores, thresholds);
+  return { version, previousScores };
 }
 
 /**
  * Regenerate with a different voice profile.
  */
-export async function runVoiceChangeAction(sessionId: string, assetType: string, newVoiceProfileId: string) {
+export async function runVoiceChangeAction(sessionId: string, assetType: string, newVoiceProfileId: string): Promise<ActionResult> {
   const db = getDatabase();
   const active = await getActiveVersion(sessionId, assetType);
   if (!active) throw new Error('No active version');
+  const previousScores = extractPreviousScores(active);
 
   const voice = await db.query.voiceProfiles.findFirst({ where: eq(voiceProfiles.id, newVoiceProfileId) });
   if (!voice) throw new Error('Voice profile not found');
@@ -339,31 +368,34 @@ export async function runVoiceChangeAction(sessionId: string, assetType: string,
   const scores = await scoreContent(response.text);
   const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
 
-  return createVersionAndActivate(sessionId, assetType, response.text, 'voice_change', {
+  const version = await createVersionAndActivate(sessionId, assetType, response.text, 'voice_change', {
     previousVoice: active.source,
     newVoiceId: newVoiceProfileId,
     newVoiceName: voice.name,
   }, scores, thresholds);
+  return { version, previousScores };
 }
 
 /**
- * Run adversarial loop: score -> gate check -> deslop -> re-score, max 3 iterations.
+ * Run adversarial loop: always attempt improvement (min 1, max 3 iterations).
+ * If content already passes gates, switches to "elevation" mode to raise scores higher.
+ * Only creates a new version if content actually changed.
  */
-export async function runAdversarialLoopAction(sessionId: string, assetType: string) {
-  let active = await getActiveVersion(sessionId, assetType);
+export async function runAdversarialLoopAction(sessionId: string, assetType: string): Promise<ActionResult> {
+  const active = await getActiveVersion(sessionId, assetType);
   if (!active) throw new Error('No active version');
+  const previousScores = extractPreviousScores(active);
 
   const thresholds = await loadSessionThresholds(sessionId);
+  const originalContent = active.content;
   let content = active.content;
   let scores = await scoreContent(content);
-  let iteration = 0;
+  let bestScore = totalQualityScore(scores);
   const maxIterations = 3;
 
-  logger.info('Running adversarial loop', { sessionId, assetType });
+  logger.info('Running adversarial loop', { sessionId, assetType, alreadyPassing: checkQualityGates(scores, thresholds) });
 
-  while (!checkQualityGates(scores, thresholds) && iteration < maxIterations) {
-    iteration++;
-
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
     // Deslop if slop is high
     if (scores.slopScore > (thresholds.slopMax ?? 5)) {
       try {
@@ -371,41 +403,71 @@ export async function runAdversarialLoopAction(sessionId: string, assetType: str
       } catch { /* continue */ }
     }
 
-    // Refinement pass
+    // Build issues list — when already passing gates, target any score below perfect
     const issues: string[] = [];
-    if (scores.vendorSpeakScore > (thresholds.vendorSpeakMax ?? 5)) {
-      issues.push(`Vendor-speak score ${scores.vendorSpeakScore.toFixed(1)} exceeds max ${thresholds.vendorSpeakMax}. Replace vendor language with practitioner language.`);
-    }
-    if (scores.specificityScore < (thresholds.specificityMin ?? 6)) {
-      issues.push(`Specificity score ${scores.specificityScore.toFixed(1)} below min ${thresholds.specificityMin}. Add concrete details.`);
-    }
-    if (scores.personaAvgScore < (thresholds.personaMin ?? 6)) {
-      issues.push(`Persona fit score ${scores.personaAvgScore.toFixed(1)} below min ${thresholds.personaMin}. Better match the target audience.`);
+    const alreadyPassing = checkQualityGates(scores, thresholds);
+
+    if (alreadyPassing) {
+      // Elevation mode: push scores higher even though they pass
+      if (scores.slopScore > 2) issues.push(`Slop score is ${scores.slopScore.toFixed(1)} — reduce AI clichés and filler further.`);
+      if (scores.vendorSpeakScore > 2) issues.push(`Vendor-speak score is ${scores.vendorSpeakScore.toFixed(1)} — make it sound even more like a practitioner wrote it.`);
+      if (scores.authenticityScore < 9) issues.push(`Authenticity is ${scores.authenticityScore.toFixed(1)} — make it sound more genuinely human.`);
+      if (scores.specificityScore < 9) issues.push(`Specificity is ${scores.specificityScore.toFixed(1)} — add more concrete details, numbers, or examples.`);
+      if (scores.personaAvgScore < 9) issues.push(`Persona fit is ${scores.personaAvgScore.toFixed(1)} — better match the target audience's concerns and language.`);
+    } else {
+      // Fix mode: target scores that fail thresholds
+      if (scores.vendorSpeakScore > (thresholds.vendorSpeakMax ?? 5)) {
+        issues.push(`Vendor-speak score ${scores.vendorSpeakScore.toFixed(1)} exceeds max ${thresholds.vendorSpeakMax}. Replace vendor language with practitioner language.`);
+      }
+      if (scores.authenticityScore < (thresholds.authenticityMin ?? 6)) {
+        issues.push(`Authenticity score ${scores.authenticityScore.toFixed(1)} below min ${thresholds.authenticityMin}. Make it sound more human.`);
+      }
+      if (scores.specificityScore < (thresholds.specificityMin ?? 6)) {
+        issues.push(`Specificity score ${scores.specificityScore.toFixed(1)} below min ${thresholds.specificityMin}. Add concrete details.`);
+      }
+      if (scores.personaAvgScore < (thresholds.personaMin ?? 6)) {
+        issues.push(`Persona fit score ${scores.personaAvgScore.toFixed(1)} below min ${thresholds.personaMin}. Better match the target audience.`);
+      }
     }
 
-    if (issues.length > 0) {
-      const refinementPrompt = `Fix these quality issues in this ${assetType.replace(/_/g, ' ')}:\n${issues.map(i => `- ${i}`).join('\n')}\n\n## Content\n${content}\n\nOutput ONLY the fixed content.`;
-      try {
-        const response = await generateWithGemini(refinementPrompt, {
-          model: config.ai.gemini.proModel,
-          temperature: 0.4,
-              });
-        content = response.text;
-      } catch { break; }
-    }
+    if (issues.length === 0) break;
+
+    const modeLabel = alreadyPassing ? 'Elevate' : 'Fix';
+    const refinementPrompt = `${modeLabel} these quality issues in this ${assetType.replace(/_/g, ' ')}:\n${issues.map(i => `- ${i}`).join('\n')}\n\n## Content\n${content}\n\nOutput ONLY the improved content. Keep the same structure and format.`;
+    try {
+      const response = await generateWithGemini(refinementPrompt, {
+        model: config.ai.gemini.proModel,
+        temperature: 0.4,
+      });
+      content = response.text;
+    } catch { break; }
 
     scores = await scoreContent(content);
+    const newScore = totalQualityScore(scores);
+
+    // Stop if quality didn't improve
+    if (newScore <= bestScore) {
+      logger.info('Adversarial loop: no improvement, stopping', { iteration, bestScore, newScore });
+      break;
+    }
+    bestScore = newScore;
   }
 
-  return createVersionAndActivate(sessionId, assetType, content, 'adversarial', {
-    iterations: iteration,
+  // Only create a new version if content actually changed
+  if (content.trim() === originalContent.trim()) {
+    return { version: null, previousScores };
+  }
+
+  const version = await createVersionAndActivate(sessionId, assetType, content, 'adversarial', {
     finalScores: scores,
   }, scores, thresholds);
+  return { version, previousScores };
 }
 
-export async function runCompetitiveDeepDiveAction(sessionId: string, assetType: string) {
+export async function runCompetitiveDeepDiveAction(sessionId: string, assetType: string): Promise<ActionResult> {
   const active = await getActiveVersion(sessionId, assetType);
   if (!active) throw new Error('No active version for competitive dive');
+  const previousScores = extractPreviousScores(active);
 
   const db = getDatabase();
   const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
@@ -448,15 +510,17 @@ export async function runCompetitiveDeepDiveAction(sessionId: string, assetType:
   const scores = await scoreContent(enriched.text);
   const thresholds = await loadSessionThresholds(sessionId);
 
-  return createVersionAndActivate(sessionId, assetType, enriched.text, 'competitive_dive', {
+  const version = await createVersionAndActivate(sessionId, assetType, enriched.text, 'competitive_dive', {
     researchLength: researchContext.length,
     enrichedAt: new Date().toISOString(),
   }, scores, thresholds);
+  return { version, previousScores };
 }
 
-export async function runCommunityCheckAction(sessionId: string, assetType: string) {
+export async function runCommunityCheckAction(sessionId: string, assetType: string): Promise<ActionResult> {
   const active = await getActiveVersion(sessionId, assetType);
   if (!active) throw new Error('No active version for community check');
+  const previousScores = extractPreviousScores(active);
 
   const db = getDatabase();
   const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
@@ -526,8 +590,139 @@ Output ONLY the rewritten content.`;
   const scores = await scoreContent(rewritten.text);
   const thresholds = await loadSessionThresholds(sessionId);
 
-  return createVersionAndActivate(sessionId, assetType, rewritten.text, 'community_check', {
+  const version = await createVersionAndActivate(sessionId, assetType, rewritten.text, 'community_check', {
     sourceCount: result.sources.length,
     enrichedAt: new Date().toISOString(),
   }, scores, thresholds);
+  return { version, previousScores };
+}
+
+/**
+ * Run multi-perspective rewrite: generate 3 angles (empathy, competitive, thought leadership)
+ * from the active version, synthesize the best elements, score all 4, keep the best.
+ */
+export async function runMultiPerspectiveAction(sessionId: string, assetType: string): Promise<ActionResult> {
+  const active = await getActiveVersion(sessionId, assetType);
+  if (!active) throw new Error('No active version for multi-perspective');
+  const previousScores = extractPreviousScores(active);
+
+  const db = getDatabase();
+  const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
+  if (!session) throw new Error('Session not found');
+
+  logger.info('Running multi-perspective action', { sessionId, assetType });
+
+  // Load voice profile
+  const voice = session.voiceProfileId
+    ? await db.query.voiceProfiles.findFirst({ where: eq(voiceProfiles.id, session.voiceProfileId) })
+    : await db.query.voiceProfiles.findFirst({ where: eq(voiceProfiles.isDefault, true) });
+  if (!voice) throw new Error('No voice profile available');
+
+  const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
+  const productDocs = await loadSessionProductDocs(session);
+  const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  const scoringContext = formatInsightsForScoring(insights);
+  const template = loadTemplate(assetType as AssetType);
+  const systemPrompt = buildSystemPrompt(voice, assetType as AssetType);
+  const selectedModel = JSON.parse(session.metadata || '{}').model;
+
+  const baseContent = active.content;
+
+  // Generate 3 perspectives in parallel using existing content as base
+  const empathyPrompt = `Rewrite this ${assetType.replace(/_/g, ' ')} from a Practitioner Empathy perspective.
+
+## Current Content
+${baseContent}
+
+## PERSPECTIVE: Practitioner Empathy
+Lead ENTIRELY with pain. The reader should feel seen before they see any product mention. Use their language, their frustrations, their 2am-on-call stories. Product comes last, almost as an afterthought. Make them nod before you pitch.
+
+## Format Guide
+${template}
+
+Output ONLY the rewritten content.`;
+
+  const competitivePrompt = `Rewrite this ${assetType.replace(/_/g, ' ')} from a Competitive Positioning perspective.
+
+## Current Content
+${baseContent}
+
+## PERSPECTIVE: Competitive Positioning
+Lead with what current alternatives FAIL at. The reader should recognize the specific frustrations they have with their current tool. Then show what's different — not "better" (that's vendor-speak), but specifically what changes and why it matters for their workflow.
+
+## Format Guide
+${template}
+
+Output ONLY the rewritten content.`;
+
+  const thoughtPrompt = `Rewrite this ${assetType.replace(/_/g, ' ')} from a Thought Leadership perspective.
+
+## Current Content
+${baseContent}
+
+## PERSPECTIVE: Thought Leadership
+Lead with the industry's broken promise — the thing everyone was told would work but doesn't. Frame the problem as systemic, not just a tooling gap. Then present a different way of thinking about it. This should read like an opinionated blog post by someone who's seen the patterns across hundreds of teams.
+
+## Format Guide
+${template}
+
+Output ONLY the rewritten content.`;
+
+  const [empathyRes, competitiveRes, thoughtRes] = await Promise.all([
+    generateContent(empathyPrompt, { systemPrompt, temperature: 0.7 }, selectedModel),
+    generateContent(competitivePrompt, { systemPrompt, temperature: 0.7 }, selectedModel),
+    generateContent(thoughtPrompt, { systemPrompt, temperature: 0.7 }, selectedModel),
+  ]);
+
+  // Synthesize the best elements
+  const synthesizePrompt = `You have 3 versions of the same ${assetType.replace(/_/g, ' ')}, each written from a different angle. Take the strongest elements from each and synthesize them into one superior version.
+
+## Version A: Practitioner Empathy
+${empathyRes.text}
+
+## Version B: Competitive Positioning
+${competitiveRes.text}
+
+## Version C: Thought Leadership
+${thoughtRes.text}
+
+## Synthesis Instructions
+1. Take the most authentic pain language from Version A
+2. Take the sharpest competitive positioning from Version B
+3. Take the strongest narrative arc from Version C
+4. Weave them into a single cohesive piece that has: authentic pain + competitive edge + compelling narrative
+5. Don't just concatenate — synthesize. The result should feel like one voice, not three stitched together.
+6. Keep the same format as the template below.
+
+## Template / Format Guide
+${template}
+
+Output ONLY the synthesized content. No meta-commentary.`;
+
+  const synthesizedRes = await generateContent(synthesizePrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
+
+  // Score all 4, keep the best
+  const [empathyScores, competitiveScores, thoughtScores, synthesizedScores] = await Promise.all([
+    scoreContent(empathyRes.text, [scoringContext]),
+    scoreContent(competitiveRes.text, [scoringContext]),
+    scoreContent(thoughtRes.text, [scoringContext]),
+    scoreContent(synthesizedRes.text, [scoringContext]),
+  ]);
+
+  const candidates = [
+    { content: empathyRes.text, scores: empathyScores, label: 'empathy' },
+    { content: competitiveRes.text, scores: competitiveScores, label: 'competitive' },
+    { content: thoughtRes.text, scores: thoughtScores, label: 'thought_leadership' },
+    { content: synthesizedRes.text, scores: synthesizedScores, label: 'synthesized' },
+  ];
+
+  const best = candidates.reduce((a, b) =>
+    totalQualityScore(b.scores) > totalQualityScore(a.scores) ? b : a
+  );
+
+  const version = await createVersionAndActivate(sessionId, assetType, best.content, 'multi_perspective', {
+    winningPerspective: best.label,
+    allScores: candidates.map(c => ({ label: c.label, total: totalQualityScore(c.scores).toFixed(1) })),
+  }, best.scores, thresholds);
+  return { version, previousScores };
 }
