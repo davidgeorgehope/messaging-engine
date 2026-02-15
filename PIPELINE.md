@@ -199,7 +199,7 @@ Each pipeline emits step events via `emitPipelineStep()` for live UI streaming. 
 
 ### Removed
 
-- **Split Research Pipeline**: Removed — identical to Standard pipeline (both already run community + competitive research in parallel).
+- **Split Research Pipeline**: Removed — identical to Standard pipeline (both already run community research first, then competitive research sequentially).
 - **`pickBestResult()` pattern**: Removed from all pipelines. Each pipeline now follows a sequential DAG where each step feeds the next.
 
 
