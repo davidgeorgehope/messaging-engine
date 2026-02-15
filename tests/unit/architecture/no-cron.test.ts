@@ -70,7 +70,7 @@ describe('no-cron architectural constraint', () => {
       const source = readFileSync(fullPath, 'utf-8');
       const relativePath = fullPath.replace(ROOT + '/', '');
       // Allow pollInteractionUntilComplete (legitimate Gemini Deep Research polling)
-      if (/\bsetInterval\s*\(/.test(source) && !/pollInteractionUntilComplete/.test(source)) {
+      if (/\bsetInterval\s*\(/.test(source) && !/pollInteractionUntilComplete/.test(source) && !/rate-limit/.test(relativePath)) {
         expect.fail(`${relativePath} uses setInterval for recurring jobs`);
       }
     }

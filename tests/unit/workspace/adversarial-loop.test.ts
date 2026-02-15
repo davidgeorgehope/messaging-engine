@@ -85,6 +85,7 @@ vi.mock('../../../src/services/ai/clients.js', () => ({
 }));
 
 vi.mock('../../../src/config.js', () => ({
+  getModelForTask: () => 'gemini-pro',
   config: { ai: { gemini: { proModel: 'gemini-pro' } } },
 }));
 
