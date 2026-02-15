@@ -560,19 +560,26 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
   const scoringContext = formatInsightsForScoring(insights);
   emitPipelineStep(jobId, 'extract-insights', 'complete');
 
-  // Step 2: Community Deep Research + Competitive Research in parallel
-  emitPipelineStep(jobId, 'research', 'running');
-  updateJobProgress(jobId, { currentStep: 'Running community & competitive research...', progress: 5 });
+  // Step 2: Community research first
+  emitPipelineStep(jobId, 'community-research', 'running');
+  updateJobProgress(jobId, { currentStep: 'Running community deep research...', progress: 5 });
+  const evidence = await runCommunityDeepResearch(insights, prompt);
+  emitPipelineStep(jobId, 'community-research', 'complete');
 
-  const [evidence, competitiveResult] = await Promise.all([
-    runCommunityDeepResearch(insights, prompt),
-    runCompetitiveResearch(insights, prompt).catch(error => {
-      logger.warn('Competitive research failed, continuing without it', {
-        jobId, error: error instanceof Error ? error.message : String(error),
-      });
-      return '';
-    }),
-  ]);
+  // Step 3: Competitive research informed by community findings
+  emitPipelineStep(jobId, 'competitive-research', 'running');
+  updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 10 });
+  let competitivePromptExtra = prompt || '';
+  if (evidence.communityContextText) {
+    competitivePromptExtra += '\n\nCommunity findings to inform competitive analysis:\n' + evidence.communityContextText.substring(0, 2000);
+  }
+  const competitiveResult = await runCompetitiveResearch(insights, competitivePromptExtra).catch(error => {
+    logger.warn('Competitive research failed, continuing without it', {
+      jobId, error: error instanceof Error ? error.message : String(error),
+    });
+    return '';
+  });
+  emitPipelineStep(jobId, 'competitive-research', 'complete');
 
   let researchContext = competitiveResult;
   if (evidence.communityContextText) {
@@ -580,9 +587,8 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
       ? `${researchContext}\n\n${evidence.communityContextText}`
       : evidence.communityContextText;
   }
-  emitPipelineStep(jobId, 'research', 'complete');
 
-  // Step 3-5: Generate → Refinement Loop → Store (per asset/voice)
+  // Step 4-6: Generate → Refinement Loop → Store (per asset/voice)
   emitPipelineStep(jobId, 'generate', 'running');
   updateJobProgress(jobId, { currentStep: 'Generating messaging...', progress: 18 });
 
@@ -803,17 +809,24 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
   const scoringContext = formatInsightsForScoring(insights);
   emitPipelineStep(jobId, 'extract-insights', 'complete');
 
-  // Step 2: Community Deep Research + Competitive Research in parallel
-  emitPipelineStep(jobId, 'research', 'running');
-  updateJobProgress(jobId, { currentStep: 'Running community & competitive research...', progress: 5 });
+  // Step 2: Community research first
+  emitPipelineStep(jobId, 'community-research', 'running');
+  updateJobProgress(jobId, { currentStep: 'Running community deep research...', progress: 5 });
+  const evidence = await runCommunityDeepResearch(insights, prompt);
+  emitPipelineStep(jobId, 'community-research', 'complete');
 
-  const [evidence, competitiveResult] = await Promise.all([
-    runCommunityDeepResearch(insights, prompt),
-    runCompetitiveResearch(insights, prompt).catch(error => {
-      logger.warn('Competitive research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
-      return '';
-    }),
-  ]);
+  // Step 3: Competitive research informed by community findings
+  emitPipelineStep(jobId, 'competitive-research', 'running');
+  updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 10 });
+  let competitivePromptExtra = prompt || '';
+  if (evidence.communityContextText) {
+    competitivePromptExtra += '\n\nCommunity findings to inform competitive analysis:\n' + evidence.communityContextText.substring(0, 2000);
+  }
+  const competitiveResult = await runCompetitiveResearch(insights, competitivePromptExtra).catch(error => {
+    logger.warn('Competitive research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
+    return '';
+  });
+  emitPipelineStep(jobId, 'competitive-research', 'complete');
 
   let researchContext = competitiveResult;
   if (evidence.communityContextText) {
@@ -821,7 +834,6 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
       ? `${researchContext}\n\n${evidence.communityContextText}`
       : evidence.communityContextText;
   }
-  emitPipelineStep(jobId, 'research', 'complete');
 
   updateJobProgress(jobId, { currentStep: 'Generating initial drafts...', progress: 18 });
 
