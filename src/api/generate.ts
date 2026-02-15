@@ -1417,7 +1417,7 @@ Target personas: ${insights.targetPersonas.join(', ')}
 Return ONLY a JSON array like: ["phrase1", "phrase2", ...]`;
 
   try {
-    const response = await generateWithGemini(prompt, { temperature: 0.2 });
+    const response = await generateWithGemini(prompt, { model: config.ai.gemini.flashModel, temperature: 0.2, maxTokens: 1000 });
     const parsed = JSON.parse(response.text.replace(/```json?\n?/g, '').replace(/```/g, '').trim());
     if (Array.isArray(parsed) && parsed.length > 0) {
       logger.info('Generated dynamic banned words', { voice: voice.name, count: parsed.length });
