@@ -12,7 +12,7 @@ import { config, getModelForTask } from '../config.js';
 import { createDeepResearchInteraction, pollInteractionUntilComplete } from '../services/research/deep-research.js';
 import { PUBLIC_GENERATION_PRIORITY_ID } from '../db/seed.js';
 import { deslop } from '../services/quality/slop-detector.js';
-import { scoreContent, checkQualityGates as checkGates, totalQualityScore, type ScoreResults } from '../services/quality/score-content.js';
+import { scoreContent, checkQualityGates as checkGates, totalQualityScore, type ScoreResults, type ScorerHealth } from '../services/quality/score-content.js';
 import { mkdirSync, readFileSync } from 'fs';
 import { readFile, writeFile, readdir } from 'fs/promises';
 import { ExtractRequestSchema, validateBody, validationError } from './validation.js';
@@ -252,7 +252,7 @@ async function loadJobInputs(jobId: string): Promise<JobInputs> {
 // Pipeline Step Events — for live streaming UI
 // ---------------------------------------------------------------------------
 
-function emitPipelineStep(jobId: string, step: string, status: 'running' | 'complete', data?: { draft?: string; scores?: any; model?: string }) {
+function emitPipelineStep(jobId: string, step: string, status: 'running' | 'complete', data?: { draft?: string; scores?: any; model?: string; scorerHealth?: ScorerHealth }) {
   const db = getDatabase();
   const job = db.select().from(generationJobs).where(eq(generationJobs.id, jobId)).get();
   const steps = JSON.parse((job as any)?.pipelineSteps || '[]');
@@ -267,6 +267,7 @@ function emitPipelineStep(jobId: string, step: string, status: 'running' | 'comp
       if (data?.model) existing.model = data.model;
       if (data?.draft) existing.draft = data.draft.substring(0, 2000);
       if (data?.scores) existing.scores = data.scores;
+      if (data?.scorerHealth) existing.scorerHealth = data.scorerHealth;
     }
   }
 
@@ -390,6 +391,7 @@ interface GenerateAndScoreResult {
   content: string;
   scores: ScoreResults;
   passesGates: boolean;
+  needsManualReview?: boolean;
 }
 
 async function generateAndScore(
@@ -428,6 +430,16 @@ async function refinementLoop(
 ): Promise<GenerateAndScoreResult> {
   let scores = await scoreContent(content, [scoringContext]);
   let wasDeslopped = false;
+
+  // If majority of scorers failed, skip refinement entirely
+  if (scores.scorerHealth.failed.length >= 2) {
+    logger.warn(`Skipping refinement \u2014 ${scores.scorerHealth.failed.length}/${scores.scorerHealth.total} scorers failed`, {
+      failed: scores.scorerHealth.failed,
+      assetType,
+      voice: voice.name,
+    });
+    return { content, scores, passesGates: checkGates(scores, thresholds), needsManualReview: true };
+  }
 
   for (let i = 0; i < maxIterations; i++) {
     if (checkGates(scores, thresholds)) break;
@@ -841,7 +853,7 @@ ${template}
         updateJobProgress(jobId, { currentStep: `Refining — ${voice.name}` });
 
         const result = await refinementLoop(layeredResponse.text, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
-        emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores });
+        emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores, scorerHealth: result.scores.scorerHealth });
 
         // Step 8: Store
         await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence, { systemPrompt, userPrompt: painFirstPrompt });
@@ -1031,7 +1043,7 @@ Output ONLY the rewritten content. No meta-commentary.`;
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'running');
         updateJobProgress(jobId, { currentStep: `Refining — ${voice.name}` });
         const result = await refinementLoop(currentContent, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
-        emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores });
+        emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores, scorerHealth: result.scores.scorerHealth });
 
         // Step 7: Store
         await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence, { systemPrompt, userPrompt });
@@ -1169,7 +1181,7 @@ Output ONLY the synthesized content. No meta-commentary.`;
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'running');
         updateJobProgress(jobId, { currentStep: `Refining — ${voice.name}` });
         const result = await refinementLoop(synthesizedResponse.text, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
-        emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores });
+        emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores, scorerHealth: result.scores.scorerHealth });
 
         // Step 6: Store
         await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence, { systemPrompt, userPrompt: baseContext });

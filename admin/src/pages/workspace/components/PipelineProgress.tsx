@@ -9,6 +9,7 @@ interface PipelineStep {
   draft?: string;
   scores?: Record<string, number>;
   model?: string;
+  scorerHealth?: { succeeded: number; failed: string[]; total: number };
 }
 
 interface Props {
@@ -120,6 +121,18 @@ export default function PipelineProgress({ sessionId, isGenerating }: Props) {
                         </span>
                       ))}
                     </div>
+                  )}
+                  {s.scorerHealth && s.scorerHealth.failed.length > 0 && (
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                        s.scorerHealth.failed.length >= 2
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-orange-50 text-orange-600"
+                      }`}
+                      title={`Failed: ${s.scorerHealth.failed.join(", ")}`}
+                    >
+                      \u26a0\ufe0f {s.scorerHealth.failed.length}/{s.scorerHealth.total} scorers failed
+                    </span>
                   )}
                 </div>
 

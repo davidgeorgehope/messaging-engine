@@ -123,7 +123,7 @@ export async function startSessionGeneration(sessionId: string) {
     const docs = await Promise.all(
       docIds.map((id: string) => db.query.productDocuments.findFirst({ where: eq(productDocuments.id, id) }))
     );
-    productDocs = docs.filter(Boolean).map((d: any) => `## ${d.name}\n${d.content}`).join('\n\n');
+    productDocs = docs.filter(Boolean).map((d: NonNullable<typeof docs[number]>) => `## ${d.name}\n${d.content}`).join('\n\n');
   }
   if (session.productContext) {
     productDocs = productDocs ? `${productDocs}\n\n## Additional Context\n${session.productContext}` : session.productContext;
@@ -241,7 +241,7 @@ export async function getSessionWithResults(sessionId: string, userId?: string, 
   if (!session) return null;
   if (userId && userId !== 'admin-env' && role !== 'admin' && session.userId !== userId) return null;
 
-  const response: any = { session };
+  const response: Record<string, unknown> = { session };
 
   if (session.jobId) {
     const job = await db.query.generationJobs.findFirst({

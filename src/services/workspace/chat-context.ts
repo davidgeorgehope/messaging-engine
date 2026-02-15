@@ -84,7 +84,7 @@ This allows the user to accept the proposed content as a new version.`);
     const docs = await Promise.all(
       docIds.map((id: string) => db.query.productDocuments.findFirst({ where: eq(productDocuments.id, id) }))
     );
-    productContext = docs.filter(Boolean).map((d: any) => `## ${d.name}\n${d.content.substring(0, 2000)}`).join('\n\n');
+    productContext = docs.filter(Boolean).map((d: NonNullable<typeof docs[number]>) => `## ${d.name}\n${d.content.substring(0, 2000)}`).join('\n\n');
   }
   if (session.productContext) {
     productContext += `\n\n## Additional Context\n${session.productContext.substring(0, 3000)}`;

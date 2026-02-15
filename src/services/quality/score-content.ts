@@ -11,6 +11,12 @@ import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('quality:score-content');
 
+export interface ScorerHealth {
+  succeeded: number;
+  failed: string[];
+  total: number;
+}
+
 export interface ScoreResults {
   slopScore: number;
   vendorSpeakScore: number;
@@ -18,6 +24,7 @@ export interface ScoreResults {
   specificityScore: number;
   personaAvgScore: number;
   slopAnalysis: any;
+  scorerHealth: ScorerHealth;
 }
 
 export const DEFAULT_THRESHOLDS = {
@@ -29,17 +36,29 @@ export const DEFAULT_THRESHOLDS = {
 };
 
 export async function scoreContent(content: string, productDocs: string[] = []): Promise<ScoreResults> {
+  const failed: string[] = [];
+
   const [slopAnalysis, vendorAnalysis, specificityAnalysis, authenticityAnalysis, personaResults] = await Promise.all([
-    analyzeSlop(content).catch((err) => { logger.warn('Slop analysis failed, using fallback', { error: String(err) }); return { score: 5 }; }),
-    analyzeVendorSpeak(content).catch((err) => { logger.warn('Vendor-speak analysis failed, using fallback', { error: String(err) }); return { score: 5 }; }),
-    analyzeSpecificity(content, productDocs).catch((err) => { logger.warn('Specificity analysis failed, using fallback', { error: String(err) }); return { score: 5 }; }),
-    analyzeAuthenticity(content).catch((err) => { logger.warn('Authenticity analysis failed, using fallback', { error: String(err) }); return { score: 5 }; }),
-    runPersonaCritics(content).catch((err) => { logger.warn('Persona critics failed, using fallback', { error: String(err) }); return []; }),
+    analyzeSlop(content).catch((err) => { logger.warn('Slop analysis failed, using fallback', { error: String(err) }); failed.push('slop'); return { score: 5, matches: [], matchCount: 0, categoryCounts: {} }; }),
+    analyzeVendorSpeak(content).catch((err) => { logger.warn('Vendor-speak analysis failed, using fallback', { error: String(err) }); failed.push('vendorSpeak'); return { score: 5 }; }),
+    analyzeSpecificity(content, productDocs).catch((err) => { logger.warn('Specificity analysis failed, using fallback', { error: String(err) }); failed.push('specificity'); return { score: 5 }; }),
+    analyzeAuthenticity(content).catch((err) => { logger.warn('Authenticity analysis failed, using fallback', { error: String(err) }); failed.push('authenticity'); return { score: 5 }; }),
+    runPersonaCritics(content).catch((err) => { logger.warn('Persona critics failed, using fallback', { error: String(err) }); failed.push('persona'); return []; }),
   ]);
 
   const personaAvg = personaResults.length > 0
     ? personaResults.reduce((sum: number, r: any) => sum + r.score, 0) / personaResults.length
     : 5;
+
+  const scorerHealth: ScorerHealth = {
+    succeeded: 5 - failed.length,
+    failed,
+    total: 5,
+  };
+
+  if (failed.length > 0) {
+    logger.warn('Scorer health degraded', { scorerHealth });
+  }
 
   return {
     slopScore: (slopAnalysis as any).score,
@@ -48,6 +67,7 @@ export async function scoreContent(content: string, productDocs: string[] = []):
     specificityScore: (specificityAnalysis as any).score,
     personaAvgScore: Math.round(personaAvg * 10) / 10,
     slopAnalysis,
+    scorerHealth,
   };
 }
 
