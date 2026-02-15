@@ -104,21 +104,23 @@ export const api = {
     request<{ deleted: boolean }>(`/workspace/sessions/${id}`, { method: 'DELETE' }),
   getSessionStatus: (id: string) => request<any>(`/workspace/sessions/${id}/status`),
 
-  // Workspace actions
+  // Workspace actions (async — return jobId, poll for result)
   runDeslop: (sessionId: string, assetType: string) =>
-    request<{ version: any; previousScores: any }>(`/workspace/sessions/${sessionId}/actions/deslop`, { method: 'POST', body: JSON.stringify({ assetType }) }),
+    request<{ jobId: string }>(`/workspace/sessions/${sessionId}/actions/deslop`, { method: 'POST', body: JSON.stringify({ assetType }) }),
   runRegenerate: (sessionId: string, assetType: string) =>
-    request<{ version: any; previousScores: any }>(`/workspace/sessions/${sessionId}/actions/regenerate`, { method: 'POST', body: JSON.stringify({ assetType }) }),
+    request<{ jobId: string }>(`/workspace/sessions/${sessionId}/actions/regenerate`, { method: 'POST', body: JSON.stringify({ assetType }) }),
   runVoiceChange: (sessionId: string, assetType: string, voiceProfileId: string) =>
-    request<{ version: any; previousScores: any }>(`/workspace/sessions/${sessionId}/actions/change-voice`, { method: 'POST', body: JSON.stringify({ assetType, voiceProfileId }) }),
+    request<{ jobId: string }>(`/workspace/sessions/${sessionId}/actions/change-voice`, { method: 'POST', body: JSON.stringify({ assetType, voiceProfileId }) }),
   runAdversarial: (sessionId: string, assetType: string) =>
-    request<{ version: any; previousScores: any; message?: string }>(`/workspace/sessions/${sessionId}/actions/adversarial`, { method: 'POST', body: JSON.stringify({ assetType }) }),
+    request<{ jobId: string }>(`/workspace/sessions/${sessionId}/actions/adversarial`, { method: 'POST', body: JSON.stringify({ assetType }) }),
   runMultiPerspective: (sessionId: string, assetType: string) =>
-    request<{ version: any; previousScores: any }>(`/workspace/sessions/${sessionId}/actions/multi-perspective`, { method: 'POST', body: JSON.stringify({ assetType }) }),
+    request<{ jobId: string }>(`/workspace/sessions/${sessionId}/actions/multi-perspective`, { method: 'POST', body: JSON.stringify({ assetType }) }),
   runCompetitiveDive: (sessionId: string, assetType: string) =>
-    request<{ version: any; previousScores: any }>(`/workspace/sessions/${sessionId}/actions/competitive-dive`, { method: 'POST', body: JSON.stringify({ assetType }) }),
+    request<{ jobId: string }>(`/workspace/sessions/${sessionId}/actions/competitive-dive`, { method: 'POST', body: JSON.stringify({ assetType }) }),
   runCommunityCheck: (sessionId: string, assetType: string) =>
-    request<{ version: any; previousScores: any }>(`/workspace/sessions/${sessionId}/actions/community-check`, { method: 'POST', body: JSON.stringify({ assetType }) }),
+    request<{ jobId: string }>(`/workspace/sessions/${sessionId}/actions/community-check`, { method: 'POST', body: JSON.stringify({ assetType }) }),
+  getActionStatus: (sessionId: string, jobId: string) =>
+    request<{ id: string; status: string; currentStep: string | null; progress: number; actionName: string; result: any; errorMessage: string | null }>(`/workspace/sessions/${sessionId}/action-status/${jobId}`),
 
   // Workspace versions
   getVersions: (sessionId: string, assetType: string) =>

@@ -133,6 +133,8 @@ export default function SessionWorkspace() {
   const [saving, setSaving] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState('');
   const [actionRunning, setActionRunning] = useState('');
+  const [actionJobId, setActionJobId] = useState<string | null>(null);
+  const actionPollRef = useRef<number | null>(null);
   const [scoreDelta, setScoreDelta] = useState<ScoreDelta | null>(null);
   const [voices, setVoices] = useState<any[]>([]);
   const [showVoiceDropdown, setShowVoiceDropdown] = useState(false);
@@ -248,33 +250,64 @@ export default function SessionWorkspace() {
     setEditContent('');
   };
 
-  const runAction = async (actionName: string, actionFn: () => Promise<any>) => {
+  const handleActionResult = useCallback((actionName: string, result: any) => {
+    const previousScores = result.previousScores || null;
+
+    if (!result.version && result.message) {
+      setScoreDelta({ actionName, previous: previousScores, current: previousScores, message: result.message });
+    } else if (result.version && previousScores) {
+      const currentScores = {
+        slop: result.version.slopScore,
+        vendorSpeak: result.version.vendorSpeakScore,
+        authenticity: result.version.authenticityScore,
+        specificity: result.version.specificityScore,
+        persona: result.version.personaAvgScore,
+        passesGates: !!result.version.passesGates,
+      };
+      setScoreDelta({ actionName, previous: previousScores, current: currentScores });
+    }
+
+    loadSession();
+  }, [loadSession]);
+
+  // Poll action job status
+  useEffect(() => {
+    if (!actionJobId || !id || !actionRunning) return;
+
+    const poll = async () => {
+      try {
+        const status = await api.getActionStatus(id, actionJobId);
+        if (status.status === 'completed') {
+          setActionJobId(null);
+          handleActionResult(actionRunning, status.result);
+          setActionRunning('');
+        } else if (status.status === 'failed') {
+          setActionJobId(null);
+          setError(`${actionRunning} failed: ${status.errorMessage || 'Unknown error'}`);
+          setActionRunning('');
+        }
+      } catch {
+        // Ignore transient poll errors
+      }
+    };
+
+    actionPollRef.current = window.setInterval(poll, 3000);
+    // Run immediately too
+    poll();
+    return () => {
+      if (actionPollRef.current) clearInterval(actionPollRef.current);
+    };
+  }, [actionJobId, id, actionRunning, handleActionResult]);
+
+  const runAction = async (actionName: string, actionFn: () => Promise<{ jobId: string }>) => {
     setActionRunning(actionName);
     setError('');
     setScoreDelta(null);
     try {
-      const result = await actionFn();
-      const previousScores = result.previousScores || null;
-
-      if (!result.version && result.message) {
-        // Adversarial no-change case
-        setScoreDelta({ actionName, previous: previousScores, current: previousScores, message: result.message });
-      } else if (result.version && previousScores) {
-        const currentScores = {
-          slop: result.version.slopScore,
-          vendorSpeak: result.version.vendorSpeakScore,
-          authenticity: result.version.authenticityScore,
-          specificity: result.version.specificityScore,
-          persona: result.version.personaAvgScore,
-          passesGates: !!result.version.passesGates,
-        };
-        setScoreDelta({ actionName, previous: previousScores, current: currentScores });
-      }
-
-      await loadSession();
+      const { jobId } = await actionFn();
+      setActionJobId(jobId);
     } catch (err: any) {
       setError(`${actionName} failed: ${err.message}`);
-    } finally {
       setActionRunning('');
     }
   };

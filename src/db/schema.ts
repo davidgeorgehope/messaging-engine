@@ -313,6 +313,23 @@ export const sessionMessages = sqliteTable('session_messages', {
 });
 
 // ============================================================================
+// Table 19: action_jobs (async background workspace actions)
+// ============================================================================
+export const actionJobs = sqliteTable('action_jobs', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  assetType: text('asset_type').notNull(),
+  actionName: text('action_name').notNull(),
+  status: text('status').notNull().default('pending'), // 'pending'|'running'|'completed'|'failed'
+  currentStep: text('current_step'),
+  progress: integer('progress').notNull().default(0),
+  result: text('result'), // JSON ActionResult on completion
+  errorMessage: text('error_message'),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+  updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+// ============================================================================
 // Type exports
 // ============================================================================
 export type MessagingPriority = typeof messagingPriorities.$inferSelect;
@@ -368,3 +385,6 @@ export type InsertSessionVersion = typeof sessionVersions.$inferInsert;
 
 export type SessionMessage = typeof sessionMessages.$inferSelect;
 export type InsertSessionMessage = typeof sessionMessages.$inferInsert;
+
+export type ActionJob = typeof actionJobs.$inferSelect;
+export type InsertActionJob = typeof actionJobs.$inferInsert;

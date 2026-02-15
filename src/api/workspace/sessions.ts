@@ -23,6 +23,7 @@ import {
   runCommunityCheckAction,
   runMultiPerspectiveAction,
 } from '../../services/workspace/actions.js';
+import { runActionInBackground, getActionJobStatus } from '../../services/workspace/action-runner.js';
 import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('api:workspace:sessions');
@@ -190,7 +191,7 @@ app.put('/:id/versions/:vid/activate', async (c) => {
   }
 });
 
-// ===== Action endpoints =====
+// ===== Action endpoints (async — return jobId immediately, poll for result) =====
 
 // POST /sessions/:id/actions/deslop
 app.post('/:id/actions/deslop', async (c) => {
@@ -198,8 +199,8 @@ app.post('/:id/actions/deslop', async (c) => {
   try {
     const { assetType } = await c.req.json();
     if (!assetType) return c.json({ error: 'assetType is required' }, 400);
-    const { version, previousScores } = await runDeslopAction(sessionId, assetType);
-    return c.json({ version, previousScores });
+    const jobId = runActionInBackground(sessionId, assetType, 'deslop', () => runDeslopAction(sessionId, assetType));
+    return c.json({ jobId }, 202);
   } catch (error) {
     logger.error('Deslop action failed', { sessionId, error: error instanceof Error ? error.message : String(error) });
     return c.json({ error: error instanceof Error ? error.message : 'Deslop failed' }, 500);
@@ -212,8 +213,8 @@ app.post('/:id/actions/regenerate', async (c) => {
   try {
     const { assetType } = await c.req.json();
     if (!assetType) return c.json({ error: 'assetType is required' }, 400);
-    const { version, previousScores } = await runRegenerateAction(sessionId, assetType);
-    return c.json({ version, previousScores });
+    const jobId = runActionInBackground(sessionId, assetType, 'regenerate', () => runRegenerateAction(sessionId, assetType));
+    return c.json({ jobId }, 202);
   } catch (error) {
     logger.error('Regenerate action failed', { sessionId, error: error instanceof Error ? error.message : String(error) });
     return c.json({ error: error instanceof Error ? error.message : 'Regenerate failed' }, 500);
@@ -226,8 +227,8 @@ app.post('/:id/actions/change-voice', async (c) => {
   try {
     const { assetType, voiceProfileId } = await c.req.json();
     if (!assetType || !voiceProfileId) return c.json({ error: 'assetType and voiceProfileId are required' }, 400);
-    const { version, previousScores } = await runVoiceChangeAction(sessionId, assetType, voiceProfileId);
-    return c.json({ version, previousScores });
+    const jobId = runActionInBackground(sessionId, assetType, 'change-voice', () => runVoiceChangeAction(sessionId, assetType, voiceProfileId));
+    return c.json({ jobId }, 202);
   } catch (error) {
     logger.error('Voice change action failed', { sessionId, error: error instanceof Error ? error.message : String(error) });
     return c.json({ error: error instanceof Error ? error.message : 'Voice change failed' }, 500);
@@ -240,11 +241,14 @@ app.post('/:id/actions/adversarial', async (c) => {
   try {
     const { assetType } = await c.req.json();
     if (!assetType) return c.json({ error: 'assetType is required' }, 400);
-    const { version, previousScores } = await runAdversarialLoopAction(sessionId, assetType);
-    if (!version) {
-      return c.json({ version: null, previousScores, message: 'Content already at maximum quality — no changes made' });
-    }
-    return c.json({ version, previousScores });
+    const jobId = runActionInBackground(sessionId, assetType, 'adversarial', async () => {
+      const { version, previousScores } = await runAdversarialLoopAction(sessionId, assetType);
+      if (!version) {
+        return { version: null, previousScores, message: 'Content already at maximum quality — no changes made' };
+      }
+      return { version, previousScores };
+    });
+    return c.json({ jobId }, 202);
   } catch (error) {
     logger.error('Adversarial action failed', { sessionId, error: error instanceof Error ? error.message : String(error) });
     return c.json({ error: error instanceof Error ? error.message : 'Adversarial loop failed' }, 500);
@@ -257,8 +261,8 @@ app.post('/:id/actions/multi-perspective', async (c) => {
   try {
     const { assetType } = await c.req.json();
     if (!assetType) return c.json({ error: 'assetType is required' }, 400);
-    const { version, previousScores } = await runMultiPerspectiveAction(sessionId, assetType);
-    return c.json({ version, previousScores });
+    const jobId = runActionInBackground(sessionId, assetType, 'multi-perspective', () => runMultiPerspectiveAction(sessionId, assetType));
+    return c.json({ jobId }, 202);
   } catch (error) {
     logger.error('Multi-perspective action failed', { sessionId, error: error instanceof Error ? error.message : String(error) });
     return c.json({ error: error instanceof Error ? error.message : 'Multi-perspective failed' }, 500);
@@ -271,8 +275,8 @@ app.post('/:id/actions/competitive-dive', async (c) => {
   try {
     const { assetType } = await c.req.json();
     if (!assetType) return c.json({ error: 'assetType is required' }, 400);
-    const { version, previousScores } = await runCompetitiveDeepDiveAction(sessionId, assetType);
-    return c.json({ version, previousScores });
+    const jobId = runActionInBackground(sessionId, assetType, 'competitive-dive', () => runCompetitiveDeepDiveAction(sessionId, assetType));
+    return c.json({ jobId }, 202);
   } catch (error) {
     logger.error('Competitive dive action failed', { sessionId, error: error instanceof Error ? error.message : String(error) });
     return c.json({ error: error instanceof Error ? error.message : 'Competitive dive failed' }, 500);
@@ -285,11 +289,24 @@ app.post('/:id/actions/community-check', async (c) => {
   try {
     const { assetType } = await c.req.json();
     if (!assetType) return c.json({ error: 'assetType is required' }, 400);
-    const { version, previousScores } = await runCommunityCheckAction(sessionId, assetType);
-    return c.json({ version, previousScores });
+    const jobId = runActionInBackground(sessionId, assetType, 'community-check', () => runCommunityCheckAction(sessionId, assetType));
+    return c.json({ jobId }, 202);
   } catch (error) {
     logger.error('Community check action failed', { sessionId, error: error instanceof Error ? error.message : String(error) });
     return c.json({ error: error instanceof Error ? error.message : 'Community check failed' }, 500);
+  }
+});
+
+// GET /sessions/:id/action-status/:jobId — poll action job progress
+app.get('/:id/action-status/:jobId', async (c) => {
+  const jobId = c.req.param('jobId');
+  try {
+    const status = getActionJobStatus(jobId);
+    if (!status) return c.json({ error: 'Action job not found' }, 404);
+    return c.json(status);
+  } catch (error) {
+    logger.error('Failed to get action status', { jobId, error: error instanceof Error ? error.message : String(error) });
+    return c.json({ error: 'Failed to get action status' }, 500);
   }
 });
 
