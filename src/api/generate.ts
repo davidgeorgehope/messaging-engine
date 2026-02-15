@@ -13,7 +13,9 @@ import { createDeepResearchInteraction, pollInteractionUntilComplete } from '../
 import { PUBLIC_GENERATION_PRIORITY_ID } from '../db/seed.js';
 import { deslop } from '../services/quality/slop-detector.js';
 import { scoreContent, checkQualityGates as checkGates, totalQualityScore, type ScoreResults } from '../services/quality/score-content.js';
-import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { mkdirSync, readFileSync } from 'fs';
+import { readFile, writeFile, readdir } from 'fs/promises';
+import { ExtractRequestSchema, validateBody, validationError } from './validation.js';
 import { join } from 'path';
 import type { AssetType } from '../services/generation/types.js';
 import { validateGrounding } from '../services/quality/grounding-validator.js';
@@ -119,7 +121,7 @@ app.post('/upload', async (c) => {
 
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    writeFileSync(filePath, buffer);
+    await writeFile(filePath, buffer);
 
     logger.info('File uploaded', { fileId, name: file.name, size: buffer.length, path: filePath });
 
@@ -133,15 +135,12 @@ app.post('/upload', async (c) => {
 // POST /api/extract — extract text from an uploaded file by ID
 app.post('/extract', async (c) => {
   try {
-    const { fileId, name } = await c.req.json();
-
-    if (!fileId) {
-      return c.json({ error: 'fileId is required' }, 400);
-    }
+    const parsed = await validateBody(c, ExtractRequestSchema);
+    if (!parsed) return validationError(c);
+    const { fileId, name } = parsed;
 
     // Find the file on disk
-    const { readdirSync } = await import('fs');
-    const files = readdirSync(UPLOADS_DIR);
+    const files = await readdir(UPLOADS_DIR);
     const match = files.find(f => f.startsWith(fileId));
 
     if (!match) {
@@ -149,7 +148,7 @@ app.post('/extract', async (c) => {
     }
 
     const filePath = join(UPLOADS_DIR, match);
-    const buffer = readFileSync(filePath);
+    const buffer = await readFile(filePath);
     const fileName = name || match.replace(`${fileId}_`, '');
 
     if (fileName.toLowerCase().endsWith('.pdf')) {

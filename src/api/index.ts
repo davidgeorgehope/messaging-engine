@@ -9,6 +9,9 @@ import { messagingPriorities, discoveredPainPoints, generationJobs, messagingAss
 import { eq } from 'drizzle-orm';
 import { authenticateUser, createUser } from '../services/auth/users.js';
 
+import { rateLimit } from './middleware/rate-limit.js';
+import { LoginRequestSchema, SignupRequestSchema, validateBody, validationError } from './validation.js';
+
 // Admin route imports
 import documentsRoutes from './admin/documents.js';
 import voicesRoutes from './admin/voices.js';
@@ -30,13 +33,21 @@ export function createApi() {
 
   app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
-  // Public API routes (no auth)
+  // Public API routes (no auth) — rate limited
+  app.use('/api/generate', rateLimit(5, 60_000));
+  app.use('/api/upload', rateLimit(30, 60_000));
+  app.use('/api/extract', rateLimit(30, 60_000));
+  app.use('/api/voices', rateLimit(30, 60_000));
+  app.use('/api/asset-types', rateLimit(30, 60_000));
+  app.use('/api/history', rateLimit(30, 60_000));
+  app.use('/api/auth/*', rateLimit(10, 60_000));
   app.route('/api', generateRoutes);
 
   // Login — try users table first, then fall back to env var admin
   app.post('/api/auth/login', async (c) => {
-    const body = await c.req.json();
-    const { username, password } = body;
+    const parsed = await validateBody(c, LoginRequestSchema);
+    if (!parsed) return validationError(c);
+    const { username, password } = parsed;
 
     // First: check users table
     const user = await authenticateUser(username, password);
@@ -61,12 +72,9 @@ export function createApi() {
   // Signup
   app.post('/api/auth/signup', async (c) => {
     try {
-      const body = await c.req.json();
-      const { username, email, password, displayName } = body;
-
-      if (!username || !email || !password || !displayName) {
-        return c.json({ error: 'username, email, password, and displayName are required' }, 400);
-      }
+      const parsed = await validateBody(c, SignupRequestSchema);
+      if (!parsed) return validationError(c);
+      const { username, email, password, displayName } = parsed;
 
       const user = await createUser({ username, email, password, displayName });
       const token = await generateToken(user.username, user.role, user.id);
