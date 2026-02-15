@@ -139,3 +139,43 @@ export function validateConfig(): void {
     throw new Error(`Configuration errors:\n${errors.map((e) => `  - ${e}`).join('\n')}`);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Model Profile System — swap all models to Flash for cheap testing
+// ---------------------------------------------------------------------------
+
+export type ModelProfile = 'production' | 'test';
+
+export type ModelTask = 'flash' | 'pro' | 'deepResearch' | 'generation' | 'scoring' | 'deslop';
+
+const MODEL_PROFILES: Record<ModelProfile, Record<ModelTask, string>> = {
+  production: {
+    flash: 'gemini-3-flash-preview',
+    pro: 'gemini-3-pro-preview',
+    deepResearch: 'deep-research-pro-preview-12-2025',
+    generation: 'gemini-3-pro-preview',
+    scoring: 'gemini-3-flash-preview',
+    deslop: 'gemini-3-pro-preview',
+  },
+  test: {
+    flash: 'gemini-2.0-flash',
+    pro: 'gemini-2.0-flash',
+    deepResearch: 'gemini-2.0-flash',
+    generation: 'gemini-2.0-flash',
+    scoring: 'gemini-2.0-flash',
+    deslop: 'gemini-2.0-flash',
+  },
+};
+
+export function getActiveModelProfile(): ModelProfile {
+  return (process.env.MODEL_PROFILE as ModelProfile) || 'production';
+}
+
+export function getModelForTask(task: ModelTask): string {
+  const profile = getActiveModelProfile();
+  return MODEL_PROFILES[profile][task];
+}
+
+export function isTestProfile(): boolean {
+  return getActiveModelProfile() === 'test';
+}

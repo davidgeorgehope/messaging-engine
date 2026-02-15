@@ -206,7 +206,7 @@ export function formatInsightsForScoring(insights: ExtractedInsights): string {
 // Deep PoV Extraction — richer narrative extraction for Standard pipeline
 // ---------------------------------------------------------------------------
 
-import { config } from '../../config.js';
+import { config, getModelForTask } from '../../config.js';
 
 export interface DeepPoVInsights extends ExtractedInsights {
   thesis: string;
@@ -263,7 +263,7 @@ Be opinionated in extraction. This is about finding the NARRATIVE, not listing f
 IMPORTANT: Return ONLY valid JSON, no markdown code fences.`;
 
     const response = await generateWithGemini(prompt, {
-      model: config.ai.gemini.proModel,
+      model: getModelForTask('pro'),
       temperature: 0.3,
     });
 

@@ -6,7 +6,7 @@ import { createLogger } from '../../utils/logger.js';
 import { analyzeSlop, deslop } from '../../services/quality/slop-detector.js';
 import { scoreContent, checkQualityGates, totalQualityScore } from '../quality/score-content.js';
 import { generateWithGemini, generateWithGeminiGroundedSearch, createDeepResearchInteraction, pollInteractionUntilComplete } from '../ai/clients.js';
-import { config } from '../../config.js';
+import { config, getModelForTask } from '../../config.js';
 import type { ScoreResults } from '../quality/score-content.js';
 import type { AssetType } from '../../services/generation/types.js';
 import {
@@ -366,7 +366,7 @@ export async function runVoiceChangeAction(sessionId: string, assetType: string,
   const prompt = `Rewrite the following ${assetType.replace(/_/g, ' ')} content using this voice profile:\n\n## Voice: ${voice.name}\n${voice.voiceGuide}\n\n## Content to Rewrite\n${active.content}\n\nRewrite in the new voice. Output ONLY the rewritten content.`;
 
   const response = await generateWithGemini(prompt, {
-    model: config.ai.gemini.proModel,
+    model: getModelForTask('pro'),
     temperature: 0.5,
   });
 
@@ -443,7 +443,7 @@ export async function runAdversarialLoopAction(sessionId: string, assetType: str
     const refinementPrompt = `${modeLabel} these quality issues in this ${assetType.replace(/_/g, ' ')}:\n${issues.map(i => `- ${i}`).join('\n')}\n\n## Content\n${content}\n\nOutput ONLY the improved content. Keep the same structure and format.`;
     try {
       const response = await generateWithGemini(refinementPrompt, {
-        model: config.ai.gemini.proModel,
+        model: getModelForTask('pro'),
         temperature: 0.4,
       });
       content = response.text;
@@ -510,7 +510,7 @@ export async function runCompetitiveDeepDiveAction(sessionId: string, assetType:
   // Enrich with Gemini Pro
   const enrichmentPrompt = buildCompetitiveEnrichmentPrompt(active.content, researchContext, assetType);
   const enriched = await generateWithGemini(enrichmentPrompt, {
-    model: config.ai.gemini.proModel,
+    model: getModelForTask('pro'),
     temperature: 0.5,
   });
 
@@ -590,7 +590,7 @@ Rewrite the content to:
 Output ONLY the rewritten content.`;
 
   const rewritten = await generateWithGemini(rewritePrompt, {
-    model: config.ai.gemini.proModel,
+    model: getModelForTask('pro'),
     temperature: 0.5,
   });
 

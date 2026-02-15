@@ -1,3 +1,4 @@
+import { getModelForTask } from '../../config.js';
 import { generateWithGemini } from '../ai/clients.js';
 import { config } from '../../config.js';
 import { createLogger } from '../../utils/logger.js';
@@ -77,7 +78,7 @@ ${content}
 Output ONLY the cleaned content.`;
 
     const response = await generateWithGemini(strippingPrompt, {
-      model: config.ai.gemini.proModel,
+      model: getModelForTask('pro'),
       temperature: 0.3,
       maxTokens: 16000,
     });

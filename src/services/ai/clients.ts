@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { GoogleGenAI } from '@google/genai';
-import { config } from '../../config.js';
+import { config, getModelForTask, isTestProfile } from '../../config.js';
 import { createLogger } from '../../utils/logger.js';
 import { withRetry, withTimeout, createRateLimiter } from '../../utils/retry.js';
 import type {
@@ -203,7 +203,7 @@ export async function generateWithGemini(
   prompt: string,
   options: GenerateOptions & { useProModel?: boolean } = {}
 ): Promise<AIResponse> {
-  const model = options.model ?? (options.useProModel ? config.ai.gemini.proModel : config.ai.gemini.flashModel);
+  const model = options.model ?? (options.useProModel ? getModelForTask("pro") : getModelForTask("flash"));
 
   await geminiRateLimiter.acquire();
 
@@ -285,7 +285,7 @@ export async function generateWithGeminiGroundedSearch(
   prompt: string,
   options: GenerateOptions = {}
 ): Promise<GroundedSearchResponse> {
-  const model = options.model ?? config.ai.gemini.flashModel;
+  const model = options.model ?? getModelForTask("flash");
 
   await geminiRateLimiter.acquire();
 
@@ -450,7 +450,7 @@ export async function generateJSON<T = unknown>(
  */
 export async function createDeepResearchInteraction(prompt: string): Promise<string> {
   const client = getGoogleClient();
-  const model = config.ai.gemini.deepResearchAgent;
+  const model = getModelForTask("deepResearch");
 
   logger.info('Creating deep research interaction', { model, promptLength: prompt.length });
 

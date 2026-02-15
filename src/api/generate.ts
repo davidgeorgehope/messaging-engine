@@ -8,7 +8,7 @@ import { eq } from 'drizzle-orm';
 import { createLogger } from '../utils/logger.js';
 import { generateId } from '../utils/hash.js';
 import { generateWithClaude, generateWithGemini } from '../services/ai/clients.js';
-import { config } from '../config.js';
+import { config, getModelForTask } from '../config.js';
 import { createDeepResearchInteraction, pollInteractionUntilComplete } from '../services/research/deep-research.js';
 import { PUBLIC_GENERATION_PRIORITY_ID } from '../db/seed.js';
 import { deslop } from '../services/quality/slop-detector.js';
@@ -989,7 +989,7 @@ ${currentContent}
 Be brutal. Every weakness you find makes the final output stronger. Format as a numbered list of specific attacks.`;
 
           const attackResponse = await generateWithGemini(attackPrompt, {
-            model: config.ai.gemini.proModel,
+            model: getModelForTask('pro'),
             temperature: 0.6,
           });
           emitPipelineStep(jobId, `attack-r${round}-${assetType}-${voice.slug}`, 'complete');
@@ -1288,7 +1288,7 @@ export async function generateContent(
   // Default: Gemini Pro for all generation
   return generateWithGemini(prompt, {
     ...options,
-    model: config.ai.gemini.proModel,
+    model: getModelForTask('pro'),
     maxTokens: options.maxTokens ?? 16000,
   });
 }
@@ -1478,7 +1478,7 @@ Target personas: ${insights.targetPersonas.join(', ')}
 Return ONLY a JSON array like: ["phrase1", "phrase2", ...]`;
 
   try {
-    const response = await generateWithGemini(prompt, { model: config.ai.gemini.flashModel, temperature: 0.2, maxTokens: 1000 });
+    const response = await generateWithGemini(prompt, { model: getModelForTask('flash'), temperature: 0.2, maxTokens: 1000 });
     const parsed = JSON.parse(response.text.replace(/```json?\n?/g, '').replace(/```/g, '').trim());
     if (Array.isArray(parsed) && parsed.length > 0) {
       logger.info('Generated dynamic banned words', { voice: voice.name, count: parsed.length });

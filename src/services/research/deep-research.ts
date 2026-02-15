@@ -1,11 +1,12 @@
 import { GoogleGenAI } from '@google/genai';
-import { config } from '../../config.js';
+import { config, getModelForTask, isTestProfile } from '../../config.js';
+import { generateWithGeminiGroundedSearch } from '../ai/clients.js';
 import { createLogger } from '../../utils/logger.js';
 import type { SearchResult } from '../ai/types.js';
 
 const logger = createLogger('research:deep-research');
 
-const DEEP_RESEARCH_AGENT = config.ai.gemini.deepResearchAgent;
+const DEEP_RESEARCH_AGENT = getModelForTask('deepResearch');
 const POLL_INTERVAL_MS = config.deepResearch.pollIntervalMs;
 const MAX_DURATION_MS = config.deepResearch.timeoutMs;
 
@@ -14,6 +15,15 @@ function getClient(): GoogleGenAI {
 }
 
 export async function createDeepResearchInteraction(prompt: string): Promise<string> {
+  // In test profile, deep research agent doesn't support Flash — use grounded search fallback
+  if (isTestProfile()) {
+    logger.info('Test profile: using grounded search fallback instead of Deep Research');
+    const result = await generateWithGeminiGroundedSearch(prompt);
+    const syntheticId = `dr-test-${Date.now().toString(36)}`;
+    _testResults.set(syntheticId, { text: result.text, sources: result.sources });
+    return syntheticId;
+  }
+
   const client = getClient();
   logger.info('Creating Deep Research interaction');
 
@@ -28,10 +38,21 @@ export async function createDeepResearchInteraction(prompt: string): Promise<str
   return interaction.id;
 }
 
+// Cache for test profile grounded search results
+const _testResults = new Map<string, { text: string; sources: SearchResult[] }>();
+
 export async function pollInteractionUntilComplete(
   interactionId: string,
   onProgress?: (status: string) => void,
 ): Promise<{ text: string; sources: SearchResult[] }> {
+  // Return cached test profile result immediately
+  if (_testResults.has(interactionId)) {
+    const cached = _testResults.get(interactionId)!;
+    _testResults.delete(interactionId);
+    onProgress?.('completed');
+    return cached;
+  }
+
   const client = getClient();
   const startTime = Date.now();
 

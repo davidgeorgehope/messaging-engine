@@ -7,7 +7,7 @@ import { generateId } from '../../utils/hash.js';
 import { createLogger } from '../../utils/logger.js';
 import { assembleChatContext } from '../../services/workspace/chat-context.js';
 import { scoreContent, checkQualityGates, DEFAULT_THRESHOLDS } from '../../services/quality/score-content.js';
-import { config } from '../../config.js';
+import { config, getModelForTask } from '../../config.js';
 import { desc } from 'drizzle-orm';
 
 const logger = createLogger('api:workspace:chat');
@@ -75,7 +75,7 @@ app.post('/:id/chat', async (c) => {
     try {
       const { GoogleGenAI } = await import('@google/genai');
       const client = new GoogleGenAI({ apiKey: config.apiKeys.googleAi });
-      const model = config.ai.gemini.proModel;
+      const model = getModelForTask('pro');
 
       let fullText = '';
 
