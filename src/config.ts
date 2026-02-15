@@ -110,6 +110,12 @@ export function validateConfig(): void {
     warnings.push('ADMIN_PASSWORD is set to default "changeme" — change in production');
   }
   if (config.admin.jwtSecret.includes('dev-secret')) {
+    if (config.server.nodeEnv !== 'development') {
+      throw new Error(
+        'FATAL: JWT_SECRET is the default development secret. Refusing to start in ' +
+        config.server.nodeEnv + ' mode. Set JWT_SECRET to a secure random string.'
+      );
+    }
     warnings.push('JWT_SECRET is using development default — change in production');
   }
 
