@@ -6,7 +6,7 @@ This skill defines how to write product messaging that sounds like it was writte
 ## Core Principles
 
 ### 1. Practitioner-First Language
-- Write like someone who has been on-call, shipped code, debugged production issues
+- Write like someone who does this work daily — not someone who writes about it
 - Use the language practitioners actually use (forums, Slack, conference talks)
 - Avoid language practitioners mock: "single pane of glass", "seamless integration", "enterprise-grade"
 - Reference real scenarios: "When your Kubernetes cluster has 200 namespaces and you can't find the one pod that's OOMKilling"
@@ -18,7 +18,7 @@ This skill defines how to write product messaging that sounds like it was writte
 - If you can't articulate the pain specifically, you don't understand it well enough to message about it
 
 ### 3. Specificity Over Claims
-- BAD: "Our platform provides comprehensive observability"
+- BAD: "Our industry-leading platform provides comprehensive solutions"
 - GOOD: "Correlate your traces with logs in one click — no context-switching between 4 different tools"
 - BAD: "Industry-leading performance"
 - GOOD: "P99 query latency under 200ms on 10TB of log data"
@@ -26,7 +26,7 @@ This skill defines how to write product messaging that sounds like it was writte
 
 ### 4. Quotes and Evidence
 - Anchor messaging in real practitioner quotes when available
-- "We heard this from an SRE at a Fortune 500: 'I spend 30 minutes just figuring out which dashboard to look at'"
+- "We heard this from a practitioner at a Fortune 500: 'I spend 30 minutes just figuring out which dashboard to look at'"
 - Attribution adds credibility even when anonymized
 - Quotes should feel raw, not polished — practitioners detect sanitized quotes instantly
 
@@ -60,7 +60,7 @@ This skill defines how to write product messaging that sounds like it was writte
 - Thresholds: vendorSpeakMax=3, authenticityMin=8
 
 #### Sales Enablement Voice (moderate)
-- Sounds like: a solutions architect who used to be an SRE
+- Sounds like: a solutions architect who used to be a practitioner
 - Tone: confident but credible, specific about capabilities
 - Allows: some product positioning, competitive framing
 - Thresholds: vendorSpeakMax=6, authenticityMin=6
@@ -86,4 +86,4 @@ When generating messaging:
 5. Generate content that would pass the "practitioner eye-roll test"
 
 ## The Eye-Roll Test
-After generating messaging, ask: "Would a senior SRE reading this in a Slack channel eye-roll?" If yes, rewrite. Real practitioners have extremely sensitive BS detectors honed by years of vendor pitches. The best messaging makes them nod, not cringe.
+After generating messaging, ask: "Would a senior practitioner reading this eye-roll?" If yes, rewrite. Real practitioners have extremely sensitive BS detectors honed by years of vendor pitches. The best messaging makes them nod, not cringe.

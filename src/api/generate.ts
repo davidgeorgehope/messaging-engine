@@ -868,7 +868,7 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
           emitPipelineStep(jobId, `attack-r${round}-${assetType}-${voice.slug}`, 'running');
           updateJobProgress(jobId, { currentStep: `Adversarial attack round ${round} — ${voice.name}` });
 
-          const attackPrompt = `You are a hostile, skeptical senior practitioner reviewing vendor messaging. You've been burned by every vendor promise in the last decade. You hate buzzwords, vague claims, and anything that sounds like it was written by someone who has never been on-call.
+          const attackPrompt = `You are a hostile, skeptical senior practitioner reviewing vendor messaging. You've been burned by every vendor promise in the last decade. You hate buzzwords, vague claims, and anything that sounds like it was written by someone who has never done the actual work.
 
 Tear apart this ${assetType.replace(/_/g, ' ')} messaging. Be ruthless but specific:
 
@@ -1001,7 +1001,7 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
         const empathyAngle = `${baseContext}
 
 ## PERSPECTIVE: Practitioner Empathy
-Lead ENTIRELY with pain. The reader should feel seen before they see any product mention. Use their language, their frustrations, their 2am-on-call stories. Product comes last, almost as an afterthought. Make them nod before you pitch.`;
+Lead ENTIRELY with pain. The reader should feel seen before they see any product mention. Use their language, their frustrations, their daily frustrations and hard-won lessons. Product comes last, almost as an afterthought. Make them nod before you pitch.`;
 
         const competitiveAngle = `${baseContext}
 
@@ -1261,8 +1261,8 @@ ${prompt ? `## Focus Area\n${prompt}\n` : ''}
 export const PERSONA_ANGLES: Record<string, string> = {
   'practitioner-community': `You are writing for practitioners — the people who actually do the work.
 Lead with the daily frustration. The reader should think "that's exactly my Tuesday."
-Every claim must pass the test: "Would an SRE share this in Slack?"
-Use the language of someone who has been on-call, debugged at 2am, and is skeptical of vendor promises.
+Every claim must pass the test: "Would a practitioner in this field share this with peers?"
+Use the language of someone who does this work daily and is skeptical of vendor promises.
 No exec-speak, no vision statements — just what's broken and how this fixes it.`,
 
   'sales-enablement': `You are arming a sales team to have credible technical conversations.

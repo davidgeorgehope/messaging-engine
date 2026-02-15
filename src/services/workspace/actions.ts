@@ -635,7 +635,7 @@ export async function runMultiPerspectiveAction(sessionId: string, assetType: st
 ${baseContent}
 
 ## PERSPECTIVE: Practitioner Empathy
-Lead ENTIRELY with pain. The reader should feel seen before they see any product mention. Use their language, their frustrations, their 2am-on-call stories. Product comes last, almost as an afterthought. Make them nod before you pitch.
+Lead ENTIRELY with pain. The reader should feel seen before they see any product mention. Use their language, their frustrations, their daily frustrations and hard-won lessons. Product comes last, almost as an afterthought. Make them nod before you pitch.
 
 ## Format Guide
 ${template}

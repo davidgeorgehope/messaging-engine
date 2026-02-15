@@ -77,9 +77,9 @@ Measures how concrete and verifiable the messaging claims are.
 Runs messaging through AI critic personas representing the target audience.
 
 **Default personas:**
-1. **Skeptical Senior SRE** — 12 years experience, been burned by vendors, values honesty and specificity
+1. **Skeptical Senior Practitioner** — 12 years experience, been burned by vendors, values honesty and specificity
 2. **Cost-Conscious Platform Engineer** — tight budget, evaluates ROI ruthlessly, tired of tools that overpromise
-3. **App Developer Who Hates O11y Tooling** — views observability as necessary evil, values simplicity above all
+3. **Reluctant Adopter** — views this tool category as necessary overhead, values simplicity above all
 
 **Each persona evaluates:**
 - Would this make me want to learn more?
