@@ -200,3 +200,132 @@ export function formatInsightsForScoring(insights: ExtractedInsights): string {
 
   return sections.join('\n\n');
 }
+
+
+// ---------------------------------------------------------------------------
+// Deep PoV Extraction — richer narrative extraction for Standard pipeline
+// ---------------------------------------------------------------------------
+
+import { config } from '../../config.js';
+
+export interface DeepPoVInsights extends ExtractedInsights {
+  thesis: string;
+  contrarianTake: string;
+  narrativeArc: {
+    problem: string;
+    insight: string;
+    approach: string;
+    outcome: string;
+  };
+  strongestClaims: Array<{
+    claim: string;
+    evidence: string;
+  }>;
+  pointOfView: string;
+}
+
+/**
+ * Deep PoV extraction for Standard pipeline — uses Gemini Pro for deeper analysis.
+ * Extracts thesis, contrarian take, narrative arc, and strongest claims.
+ */
+export async function extractDeepPoV(productDocs: string): Promise<DeepPoVInsights | null> {
+  try {
+    const truncated = productDocs.substring(0, 200000);
+    const prompt = `Analyze the following product documentation deeply. Extract not just what the product does, but what OPINION it represents about the industry.
+
+## Documentation
+${truncated}
+
+Return a JSON object with these fields:
+- "productCapabilities": array of specific product capabilities/features (max 12)
+- "keyDifferentiators": array of what makes this product different from alternatives (max 8)
+- "targetPersonas": array of who this product is for, with their roles and concerns (max 6)
+- "painPointsAddressed": array of specific practitioner pain points this product solves (max 10)
+- "claimsAndMetrics": array of concrete claims, numbers, benchmarks, or performance metrics (max 10)
+- "technicalDetails": array of important technical details, integrations, or architecture notes (max 8)
+- "summary": a 2-3 sentence summary of what this product does and why it matters
+- "domain": the broad industry domain (e.g. "observability", "security", "databases", "CI/CD")
+- "category": the product category within that domain
+- "productType": the type of product (e.g. "SaaS platform", "open-source tool")
+- "thesis": The product's core argument in 1-2 sentences. What is this product's OPINION about how things should work? Not features — the belief system.
+- "contrarianTake": Where does this product/company disagree with conventional wisdom or the status quo? What do they think everyone else gets wrong?
+- "narrativeArc": {
+    "problem": The problem as this product frames it (not generic — their specific framing),
+    "insight": The non-obvious insight that led to this approach,
+    "approach": How they approach the problem differently than alternatives,
+    "outcome": What becomes possible that wasn't before
+  }
+- "strongestClaims": Array of {"claim": "specific claim", "evidence": "supporting evidence from the docs"} — max 6. Only claims that have backing in the docs.
+- "pointOfView": A 2-3 sentence opinionated stance that captures the product's worldview. Write it like an opinion piece opening, not a feature description.
+
+Be opinionated in extraction. This is about finding the NARRATIVE, not listing features.
+
+IMPORTANT: Return ONLY valid JSON, no markdown code fences.`;
+
+    const response = await generateWithGemini(prompt, {
+      model: config.ai.gemini.proModel,
+      temperature: 0.3,
+    });
+
+    let jsonText = response.text.trim();
+    if (jsonText.startsWith('```')) {
+      jsonText = jsonText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+    }
+
+    const parsed = JSON.parse(jsonText) as Partial<DeepPoVInsights>;
+
+    return {
+      productCapabilities: parsed.productCapabilities ?? [],
+      keyDifferentiators: parsed.keyDifferentiators ?? [],
+      targetPersonas: parsed.targetPersonas ?? [],
+      painPointsAddressed: parsed.painPointsAddressed ?? [],
+      claimsAndMetrics: parsed.claimsAndMetrics ?? [],
+      technicalDetails: parsed.technicalDetails ?? [],
+      summary: parsed.summary ?? '',
+      domain: parsed.domain ?? 'unknown',
+      category: parsed.category ?? 'unknown',
+      productType: parsed.productType ?? 'unknown',
+      thesis: parsed.thesis ?? '',
+      contrarianTake: parsed.contrarianTake ?? '',
+      narrativeArc: {
+        problem: parsed.narrativeArc?.problem ?? '',
+        insight: parsed.narrativeArc?.insight ?? '',
+        approach: parsed.narrativeArc?.approach ?? '',
+        outcome: parsed.narrativeArc?.outcome ?? '',
+      },
+      strongestClaims: parsed.strongestClaims ?? [],
+      pointOfView: parsed.pointOfView ?? '',
+    };
+  } catch (error) {
+    logger.error('Deep PoV extraction failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+/**
+ * Format deep PoV insights for generation prompts — richer than formatInsightsForPrompt.
+ */
+export function formatDeepPoVForPrompt(insights: DeepPoVInsights): string {
+  const sections: string[] = [];
+
+  sections.push(`### Point of View\n${insights.pointOfView}`);
+  sections.push(`### Thesis\n${insights.thesis}`);
+  sections.push(`### Contrarian Take\n${insights.contrarianTake}`);
+
+  sections.push(`### Narrative Arc
+**Problem**: ${insights.narrativeArc.problem}
+**Insight**: ${insights.narrativeArc.insight}
+**Approach**: ${insights.narrativeArc.approach}
+**Outcome**: ${insights.narrativeArc.outcome}`);
+
+  if (insights.strongestClaims.length > 0) {
+    sections.push(`### Strongest Claims\n${insights.strongestClaims.map(c => `- **${c.claim}**: ${c.evidence}`).join('\n')}`);
+  }
+
+  // Include the base insights too
+  sections.push(formatInsightsForPrompt(insights));
+
+  return sections.join('\n\n');
+}

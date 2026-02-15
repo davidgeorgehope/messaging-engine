@@ -25,6 +25,9 @@ import {
   formatInsightsForPrompt,
   formatInsightsForScoring,
   type ExtractedInsights,
+  extractDeepPoV,
+  formatDeepPoVForPrompt,
+  type DeepPoVInsights,
 } from '../services/product/insights.js';
 import { nameSessionFromInsights } from '../services/workspace/sessions.js';
 
@@ -550,23 +553,25 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
   const totalItems = selectedAssetTypes.length * selectedVoices.length;
   let completedItems = 0;
 
-  // Step 1: Extract insights
-  emitPipelineStep(jobId, 'extract-insights', 'running');
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
-  const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  // Step 0: Deep PoV Extraction (Gemini Pro — deeper narrative analysis)
+  emitPipelineStep(jobId, 'deep-pov-extraction', 'running');
+  updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting deep product PoV (thesis, narrative, claims)...', progress: 2 });
+  const povInsights = await extractDeepPoV(productDocs);
+  const insights: ExtractedInsights = povInsights ?? await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
+  const deepPoV = povInsights; // null if extraction failed — falls back to standard flow
   await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
     logger.warn('Session naming failed', { jobId, error: err instanceof Error ? err.message : String(err) });
   });
   const scoringContext = formatInsightsForScoring(insights);
-  emitPipelineStep(jobId, 'extract-insights', 'complete');
+  emitPipelineStep(jobId, 'deep-pov-extraction', 'complete');
 
-  // Step 2: Community research first
-  emitPipelineStep(jobId, 'community-research', 'running');
-  updateJobProgress(jobId, { currentStep: 'Running community deep research...', progress: 5 });
+  // Step 1: Community research — purpose is VALIDATION of our PoV, not discovery
+  emitPipelineStep(jobId, 'community-validation', 'running');
+  updateJobProgress(jobId, { currentStep: 'Validating PoV against community reality...', progress: 5 });
   const evidence = await runCommunityDeepResearch(insights, prompt);
-  emitPipelineStep(jobId, 'community-research', 'complete');
+  emitPipelineStep(jobId, 'community-validation', 'complete');
 
-  // Step 3: Competitive research informed by community findings
+  // Step 2: Competitive research — informed by community findings
   emitPipelineStep(jobId, 'competitive-research', 'running');
   updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 10 });
   let competitivePromptExtra = prompt || '';
@@ -581,16 +586,9 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
   });
   emitPipelineStep(jobId, 'competitive-research', 'complete');
 
-  let researchContext = competitiveResult;
-  if (evidence.communityContextText) {
-    researchContext = researchContext
-      ? `${researchContext}\n\n${evidence.communityContextText}`
-      : evidence.communityContextText;
-  }
-
-  // Step 4-6: Generate → Refinement Loop → Store (per asset/voice)
+  // Step 3: Generate from YOUR narrative (PoV-first)
   emitPipelineStep(jobId, 'generate', 'running');
-  updateJobProgress(jobId, { currentStep: 'Generating messaging...', progress: 18 });
+  updateJobProgress(jobId, { currentStep: 'Generating from product narrative...', progress: 18 });
 
   for (const assetType of selectedAssetTypes) {
     const template = loadTemplate(assetType);
@@ -598,16 +596,26 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
       updateJobProgress(jobId, { currentStep: `Generating ${ASSET_TYPE_LABELS[assetType]} — ${voice.name}` });
 
       const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
-      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
-      const userPrompt = buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel);
+
+      // Use PoV-first system prompt and user prompt when deep PoV is available
+      const systemPrompt = deepPoV
+        ? buildSystemPrompt(voice, assetType, evidence.evidenceLevel, 'standard')
+        : buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
+
+      let researchContext = competitiveResult;
+      if (evidence.communityContextText) {
+        researchContext = researchContext
+          ? `${researchContext}\n\n${evidence.communityContextText}`
+          : evidence.communityContextText;
+      }
+
+      const userPrompt = deepPoV
+        ? buildPoVFirstPrompt(deepPoV, evidence.communityContextText, competitiveResult, template, assetType, existingMessaging, prompt)
+        : buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel);
 
       try {
-        // Generate initial draft
         const initial = await generateAndScore(userPrompt, systemPrompt, selectedModel, scoringContext, thresholds);
-
-        // Refinement loop (up to 3 iterations)
         const result = await refinementLoop(initial.content, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
-
         await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence);
       } catch (error) {
         logger.error('Failed to generate variant', {
@@ -622,7 +630,8 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
   }
 
   emitPipelineStep(jobId, 'generate', 'complete');
-  return finalizeJob(jobId, !!researchContext, researchContext.length);
+  const researchLen = (competitiveResult?.length || 0) + (evidence.communityContextText?.length || 0);
+  return finalizeJob(jobId, !!(competitiveResult || evidence.communityContextText), researchLen);
 }
 
 // ---------------------------------------------------------------------------
@@ -1275,7 +1284,67 @@ Make it scannable — someone scrolling on their phone should get the core messa
 Every section should pass the 30-second attention test: would they keep reading?`,
 };
 
-export function buildSystemPrompt(voice: any, assetType: AssetType, evidenceLevel?: EvidenceBundle['evidenceLevel']): string {
+
+// ---------------------------------------------------------------------------
+// PoV-First Prompt Builder — for Standard pipeline with deep PoV extraction
+// ---------------------------------------------------------------------------
+
+function buildPoVFirstPrompt(
+  povInsights: DeepPoVInsights,
+  communityContext: string,
+  competitiveContext: string,
+  template: string,
+  assetType: AssetType,
+  existingMessaging?: string,
+  prompt?: string,
+): string {
+  let result = `## Our Point of View
+${povInsights.pointOfView}
+
+## Thesis
+${povInsights.thesis}
+
+## The Contrarian Take
+${povInsights.contrarianTake}
+
+## Narrative Arc
+**Problem**: ${povInsights.narrativeArc.problem}
+**Insight**: ${povInsights.narrativeArc.insight}
+**Approach**: ${povInsights.narrativeArc.approach}
+**Outcome**: ${povInsights.narrativeArc.outcome}
+
+## Strongest Claims (with evidence)
+${povInsights.strongestClaims.map(c => `- **${c.claim}**: ${c.evidence}`).join('\n')}
+
+## Full Product Intelligence
+${formatInsightsForPrompt(povInsights)}
+
+## Community Validation
+The following community evidence supports (or challenges) our narrative. Use it to strengthen claims, NOT to change the narrative:
+${communityContext.substring(0, 4000)}
+
+${competitiveContext ? `## Competitive Context\n${competitiveContext.substring(0, 4000)}` : ''}`;
+
+  if (existingMessaging) {
+    result += `\n\n## Existing Messaging (for reference/improvement)\n${existingMessaging.substring(0, 4000)}`;
+  }
+
+  if (prompt) {
+    result += `\n\n## Focus / Instructions\n${prompt}`;
+  }
+
+  result += `\n\n## Template / Format Guide
+${template}
+
+## Instructions
+Generate this ${assetType.replace(/_/g, ' ')} from OUR point of view. This is opinionated content — we have a specific narrative and thesis. The community evidence validates our claims; the competitive context sharpens our positioning. But the STORY is ours.
+
+Lead with the thesis or contrarian take. Make the reader think "that's a bold but defensible position." Output ONLY the content.`;
+
+  return result;
+}
+
+export function buildSystemPrompt(voice: any, assetType: AssetType, evidenceLevel?: EvidenceBundle['evidenceLevel'], pipeline?: 'standard' | 'outside-in'): string {
   let typeInstructions = '';
 
   if (assetType === 'messaging_template') {
@@ -1304,12 +1373,20 @@ Weave practitioner quotes naturally throughout. Mark each variant clearly with h
   // Look up persona-specific angle
   const personaAngle = PERSONA_ANGLES[voice.slug] || '';
 
-  return `You are a messaging strategist generating ${assetType.replace(/_/g, ' ')} content.
-
-## Primary Directive
+  const primaryDirective = pipeline === 'standard'
+    ? `## Primary Directive
+Lead with your point of view. The reader should encounter a clear, opinionated stance in the first two sentences.
+This isn't neutral reporting — it's a well-supported argument. Back every claim with evidence from the product docs.
+Open with the thesis or contrarian take. Make the reader think "that's a bold but defensible position."
+Then build the argument with evidence and narrative arc.`
+    : `## Primary Directive
 Lead with the pain. The reader should recognize their frustration in the first two sentences.
 Do not open with what the product does. Open with what's broken, what hurts, what the reader is struggling with today.
-Then — and only then — show how things change.
+Then — and only then — show how things change.`;
+
+  return `You are a messaging strategist generating ${assetType.replace(/_/g, ' ')} content.
+
+${primaryDirective}
 
 ${personaAngle ? `## Persona Angle\n${personaAngle}\n` : ''}
 ## Voice Profile: ${voice.name}
