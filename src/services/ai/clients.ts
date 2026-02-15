@@ -19,7 +19,8 @@ const logger = createLogger('ai-clients');
 // Rate limiters
 // ---------------------------------------------------------------------------
 const claudeRateLimiter = createRateLimiter({ maxRequests: 10, windowMs: 60000 });
-const geminiRateLimiter = createRateLimiter({ maxRequests: 15, windowMs: 60000 });
+const geminiFlashRateLimiter = createRateLimiter({ maxRequests: 60, windowMs: 60000 });
+const geminiProRateLimiter = createRateLimiter({ maxRequests: 15, windowMs: 60000 });
 
 // ---------------------------------------------------------------------------
 // Lazy-initialized clients
@@ -204,8 +205,9 @@ export async function generateWithGemini(
   options: GenerateOptions & { useProModel?: boolean } = {}
 ): Promise<AIResponse> {
   const model = options.model ?? (options.useProModel ? getModelForTask("pro") : getModelForTask("flash"));
+  const isProModel = options.useProModel || (options.model && options.model.includes("pro"));
 
-  await geminiRateLimiter.acquire();
+  await (isProModel ? geminiProRateLimiter : geminiFlashRateLimiter).acquire();
 
   const startTime = performance.now();
 
@@ -287,7 +289,7 @@ export async function generateWithGeminiGroundedSearch(
 ): Promise<GroundedSearchResponse> {
   const model = options.model ?? getModelForTask("flash");
 
-  await geminiRateLimiter.acquire();
+  await geminiFlashRateLimiter.acquire();
 
   const startTime = performance.now();
 
