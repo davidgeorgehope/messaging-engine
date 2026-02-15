@@ -15,7 +15,7 @@
     "admin:build": "cd admin && npm run build",
     "test": "MODEL_PROFILE=test vitest run",
     "test:unit": "MODEL_PROFILE=test vitest run tests/unit/",
-    "test:e2e": "MODEL_PROFILE=test vitest run tests/e2e/ --test-timeout 300000"
+    "test:e2e": "MODEL_PROFILE=test vitest run tests/e2e/ --test-timeout 300000 2>&1 | tee test-e2e.log"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
