@@ -186,6 +186,7 @@ export const assetTraceability = sqliteTable('asset_traceability', {
   researchId: text('research_id').references(() => competitiveResearch.id, { onDelete: 'set null' }),
   productDocId: text('product_doc_id').references(() => productDocuments.id, { onDelete: 'set null' }),
   practitionerQuotes: text('practitioner_quotes').notNull(), // JSON
+  generationPrompt: text('generation_prompt'), // JSON: {system, user, timestamp}
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
 });
 
@@ -216,6 +217,7 @@ export const voiceProfiles = sqliteTable('voice_profiles', {
   examplePhrases: text('example_phrases').notNull(), // JSON
   isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
   isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+  bannedWords: text('banned_words'), // JSON array of strings, nullable
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text('updated_at').notNull().$defaultFn(() => new Date().toISOString()),
 });

@@ -69,6 +69,18 @@ const TEMPLATE_DIR = join(process.cwd(), 'templates');
 
 export const ALL_ASSET_TYPES: AssetType[] = ['battlecard', 'talk_track', 'launch_messaging', 'social_hook', 'one_pager', 'email_copy', 'messaging_template', 'narrative'];
 
+
+export const ASSET_TYPE_TEMPERATURE: Record<AssetType, number> = {
+  social_hook: 0.85,
+  narrative: 0.8,
+  email_copy: 0.75,
+  launch_messaging: 0.7,
+  one_pager: 0.6,
+  talk_track: 0.65,
+  battlecard: 0.55,
+  messaging_template: 0.5,
+};
+
 export const ASSET_TYPE_LABELS: Record<AssetType, string> = {
   battlecard: 'Battlecard',
   talk_track: 'Talk Track',
@@ -386,10 +398,12 @@ async function generateAndScore(
   model: string,
   scoringContext: string,
   thresholds: any,
+  assetType?: AssetType,
 ): Promise<GenerateAndScoreResult> {
+  const temperature = assetType ? ASSET_TYPE_TEMPERATURE[assetType] ?? 0.7 : 0.7;
   const response = await generateContent(userPrompt, {
     systemPrompt,
-    temperature: 0.7,
+    temperature,
   }, model);
 
   const scores = await scoreContent(response.text, [scoringContext]);
@@ -413,6 +427,7 @@ async function refinementLoop(
   maxIterations: number = 3,
 ): Promise<GenerateAndScoreResult> {
   let scores = await scoreContent(content, [scoringContext]);
+  let wasDeslopped = false;
 
   for (let i = 0; i < maxIterations; i++) {
     if (checkGates(scores, thresholds)) break;
@@ -421,6 +436,7 @@ async function refinementLoop(
     if (scores.slopScore > thresholds.slopMax) {
       try {
         content = await deslop(content, scores.slopAnalysis);
+        wasDeslopped = true;
       } catch (deslopErr) {
         logger.warn('Deslop failed, continuing with original', {
           error: deslopErr instanceof Error ? deslopErr.message : String(deslopErr),
@@ -429,7 +445,7 @@ async function refinementLoop(
     }
 
     // Build refinement prompt from failing scores
-    const refinementPrompt = buildRefinementPrompt(content, scores, thresholds, voice, assetType);
+    const refinementPrompt = buildRefinementPrompt(content, scores, thresholds, voice, assetType, wasDeslopped);
     try {
       const refined = await generateContent(refinementPrompt, {
         systemPrompt,
@@ -466,6 +482,7 @@ async function storeVariant(
   passesGates: boolean,
   prompt?: string,
   evidence?: EvidenceBundle,
+  generationPrompts?: { systemPrompt: string; userPrompt: string },
 ) {
   const db = getDatabase();
   const assetId = generateId();
@@ -540,6 +557,11 @@ async function storeVariant(
     id: generateId(),
     assetId,
     practitionerQuotes: JSON.stringify(evidence?.practitionerQuotes ?? []),
+    generationPrompt: generationPrompts ? JSON.stringify({
+      system: generationPrompts.systemPrompt.substring(0, 10000),
+      user: generationPrompts.userPrompt.substring(0, 20000),
+      timestamp: new Date().toISOString(),
+    }) : null,
     createdAt: new Date().toISOString(),
   });
 }
@@ -614,9 +636,9 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
         : buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel);
 
       try {
-        const initial = await generateAndScore(userPrompt, systemPrompt, selectedModel, scoringContext, thresholds);
+        const initial = await generateAndScore(userPrompt, systemPrompt, selectedModel, scoringContext, thresholds, assetType);
         const result = await refinementLoop(initial.content, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
-        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence);
+        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence, { systemPrompt, userPrompt });
       } catch (error) {
         logger.error('Failed to generate variant', {
           jobId, assetType, voice: voice.name,
@@ -682,7 +704,7 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
         updateJobProgress(jobId, { currentStep: `Generating pain-grounded draft — ${voice.name}` });
 
         const painFirstPrompt = buildPainFirstPrompt(practitionerContext, template, assetType, insights);
-        const firstDraftResponse = await generateContent(painFirstPrompt, { systemPrompt, temperature: 0.7 }, selectedModel);
+        const firstDraftResponse = await generateContent(painFirstPrompt, { systemPrompt, temperature: ASSET_TYPE_TEMPERATURE[assetType] ?? 0.7 }, selectedModel);
         emitPipelineStep(jobId, `pain-draft-${assetType}-${voice.slug}`, 'complete', { draft: firstDraftResponse.text });
 
         // Step 4: Competitive research (with draft context for targeting)
@@ -748,7 +770,7 @@ ${template}
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores });
 
         // Step 8: Store
-        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence);
+        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence, { systemPrompt, userPrompt: painFirstPrompt });
       } catch (error) {
         logger.error('Failed to generate variant', {
           jobId, assetType, voice: voice.name,
@@ -858,7 +880,7 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
         // Step 3: Generate initial draft
         emitPipelineStep(jobId, `draft-${assetType}-${voice.slug}`, 'running');
         updateJobProgress(jobId, { currentStep: `Generating initial draft — ${voice.name}` });
-        const initialResponse = await generateContent(userPrompt, { systemPrompt, temperature: 0.7 }, selectedModel);
+        const initialResponse = await generateContent(userPrompt, { systemPrompt, temperature: ASSET_TYPE_TEMPERATURE[assetType] ?? 0.7 }, selectedModel);
         let currentContent = initialResponse.text;
         emitPipelineStep(jobId, `draft-${assetType}-${voice.slug}`, 'complete', { draft: currentContent });
 
@@ -931,7 +953,7 @@ Output ONLY the rewritten content. No meta-commentary.`;
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores });
 
         // Step 7: Store
-        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence);
+        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence, { systemPrompt, userPrompt });
       } catch (error) {
         logger.error('Failed to generate variant', {
           jobId, assetType, voice: voice.name,
@@ -1016,10 +1038,11 @@ Lead with the industry's broken promise — the thing everyone was told would wo
         emitPipelineStep(jobId, `perspectives-${assetType}-${voice.slug}`, 'running');
         updateJobProgress(jobId, { currentStep: `Generating 3 perspectives — ${voice.name}` });
 
+        const perspectiveTemp = ASSET_TYPE_TEMPERATURE[assetType] ?? 0.7;
         const [empathyRes, competitiveRes, thoughtRes] = await Promise.all([
-          generateContent(empathyAngle, { systemPrompt, temperature: 0.7 }, selectedModel),
-          generateContent(competitiveAngle, { systemPrompt, temperature: 0.7 }, selectedModel),
-          generateContent(thoughtLeadershipAngle, { systemPrompt, temperature: 0.7 }, selectedModel),
+          generateContent(empathyAngle, { systemPrompt, temperature: perspectiveTemp }, selectedModel),
+          generateContent(competitiveAngle, { systemPrompt, temperature: perspectiveTemp }, selectedModel),
+          generateContent(thoughtLeadershipAngle, { systemPrompt, temperature: perspectiveTemp }, selectedModel),
         ]);
         emitPipelineStep(jobId, `perspectives-${assetType}-${voice.slug}`, 'complete');
 
@@ -1061,7 +1084,7 @@ Output ONLY the synthesized content. No meta-commentary.`;
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores });
 
         // Step 6: Store
-        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence);
+        await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence, { systemPrompt, userPrompt: baseContext });
       } catch (error) {
         logger.error('Failed to generate variant', {
           jobId, assetType, voice: voice.name,
@@ -1191,6 +1214,7 @@ export function buildRefinementPrompt(
   thresholds: any,
   voice: any,
   assetType: AssetType,
+  wasDeslopped: boolean = false,
 ): string {
   const issues: string[] = [];
 
@@ -1344,7 +1368,15 @@ Lead with the thesis or contrarian take. Make the reader think "that's a bold bu
   return result;
 }
 
+const DEFAULT_BANNED_WORDS = [
+  "industry-leading", "best-in-class", "next-generation", "enterprise-grade",
+  "mission-critical", "turnkey", "end-to-end", "single pane of glass",
+  "seamless", "robust", "leverage", "cutting-edge", "game-changer"
+];
+
 export function buildSystemPrompt(voice: any, assetType: AssetType, evidenceLevel?: EvidenceBundle['evidenceLevel'], pipeline?: 'standard' | 'outside-in'): string {
+  const bannedWords: string[] = voice.bannedWords ? JSON.parse(voice.bannedWords) : DEFAULT_BANNED_WORDS;
+  const bannedWordsList = bannedWords.map(w => `"${w}"`).join(', ');
   let typeInstructions = '';
 
   if (assetType === 'messaging_template') {
@@ -1401,7 +1433,7 @@ ${typeInstructions}
 5. Every claim must be traceable to the product docs or research
 6. Sound like someone who understands the practitioner's world, not someone selling to them
 7. Be specific — names, numbers, scenarios. Vague messaging is bad messaging.
-8. DO NOT use: "industry-leading", "best-in-class", "next-generation", "enterprise-grade", "mission-critical", "turnkey", "end-to-end", "single pane of glass", "seamless", "robust", "leverage", "cutting-edge", "game-changer"
+8. DO NOT use these banned words/phrases: ${bannedWordsList}
 
 ## Evidence Grounding Rules
 ${evidenceLevel === 'product-only' ? `CRITICAL: You have NO community evidence for this generation. Do NOT fabricate practitioner quotes or use phrases like "practitioners say...", "as one engineer noted...", "community sentiment suggests...", "teams report...", or "according to engineers on Reddit...". Write from product documentation only. Where practitioner validation would strengthen a point, write: "[Needs community validation]".` : `You have real community evidence in the prompt. ONLY reference practitioners and quotes from the "Verified Community Evidence" section. Do NOT fabricate additional quotes or community references beyond what is provided. Every practitioner reference must come from that section.`}`;

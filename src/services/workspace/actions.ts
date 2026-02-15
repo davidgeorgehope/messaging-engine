@@ -23,6 +23,7 @@ import {
   buildRefinementPrompt,
   loadTemplate,
   generateContent,
+  ASSET_TYPE_TEMPERATURE,
 } from '../../api/generate.js';
 
 const logger = createLogger('workspace:actions');
@@ -290,7 +291,7 @@ export async function runRegenerateAction(sessionId: string, assetType: string):
   const selectedModel = JSON.parse(session.metadata || '{}').model;
   const response = await generateContent(userPrompt, {
     systemPrompt,
-    temperature: 0.7,
+    temperature: ASSET_TYPE_TEMPERATURE[assetType as AssetType] ?? 0.7,
   }, selectedModel);
 
   let finalContent = response.text;
@@ -392,6 +393,7 @@ export async function runAdversarialLoopAction(sessionId: string, assetType: str
   let scores = await scoreContent(content);
   let bestScore = totalQualityScore(scores);
   const maxIterations = 3;
+  let wasDeslopped = false;
 
   logger.info('Running adversarial loop', { sessionId, assetType, alreadyPassing: checkQualityGates(scores, thresholds) });
 
@@ -400,6 +402,7 @@ export async function runAdversarialLoopAction(sessionId: string, assetType: str
     if (scores.slopScore > (thresholds.slopMax ?? 5)) {
       try {
         content = await deslop(content, scores.slopAnalysis);
+        wasDeslopped = true;
       } catch { /* continue */ }
     }
 
@@ -668,10 +671,11 @@ ${template}
 
 Output ONLY the rewritten content.`;
 
+  const perspectiveTemp = ASSET_TYPE_TEMPERATURE[assetType as AssetType] ?? 0.7;
   const [empathyRes, competitiveRes, thoughtRes] = await Promise.all([
-    generateContent(empathyPrompt, { systemPrompt, temperature: 0.7 }, selectedModel),
-    generateContent(competitivePrompt, { systemPrompt, temperature: 0.7 }, selectedModel),
-    generateContent(thoughtPrompt, { systemPrompt, temperature: 0.7 }, selectedModel),
+    generateContent(empathyPrompt, { systemPrompt, temperature: perspectiveTemp }, selectedModel),
+    generateContent(competitivePrompt, { systemPrompt, temperature: perspectiveTemp }, selectedModel),
+    generateContent(thoughtPrompt, { systemPrompt, temperature: perspectiveTemp }, selectedModel),
   ]);
 
   // Synthesize the best elements
