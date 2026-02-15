@@ -158,12 +158,12 @@ const MODEL_PROFILES: Record<ModelProfile, Record<ModelTask, string>> = {
     deslop: 'gemini-3-pro-preview',
   },
   test: {
-    flash: 'gemini-2.0-flash',
-    pro: 'gemini-2.0-flash',
-    deepResearch: 'gemini-2.0-flash',
-    generation: 'gemini-2.0-flash',
-    scoring: 'gemini-2.0-flash',
-    deslop: 'gemini-2.0-flash',
+    flash: 'gemini-2.5-flash',
+    pro: 'gemini-2.5-flash',
+    deepResearch: 'gemini-2.5-flash',
+    generation: 'gemini-2.5-flash',
+    scoring: 'gemini-2.5-flash',
+    deslop: 'gemini-2.5-flash',
   },
 };
 
