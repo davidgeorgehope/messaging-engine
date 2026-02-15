@@ -587,6 +587,12 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
   const scoringContext = formatInsightsForScoring(insights);
   emitPipelineStep(jobId, 'deep-pov-extraction', 'complete');
 
+  // Pre-generate banned words for each voice (cached per voice+domain)
+  const voiceBannedWords = new Map<string, string[]>();
+  await Promise.all(selectedVoices.map(async (voice) => {
+    voiceBannedWords.set(voice.id, await getBannedWordsForVoice(voice, insights));
+  }));
+
   // Step 1: Community research — purpose is VALIDATION of our PoV, not discovery
   emitPipelineStep(jobId, 'community-validation', 'running');
   updateJobProgress(jobId, { currentStep: 'Validating PoV against community reality...', progress: 5 });
@@ -620,9 +626,10 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
       const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
 
       // Use PoV-first system prompt and user prompt when deep PoV is available
+      const bannedWords = voiceBannedWords.get(voice.id);
       const systemPrompt = deepPoV
-        ? buildSystemPrompt(voice, assetType, evidence.evidenceLevel, 'standard')
-        : buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
+        ? buildSystemPrompt(voice, assetType, evidence.evidenceLevel, 'standard', bannedWords)
+        : buildSystemPrompt(voice, assetType, evidence.evidenceLevel, undefined, bannedWords);
 
       let researchContext = competitiveResult;
       if (evidence.communityContextText) {
@@ -675,6 +682,12 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
   const scoringContext = formatInsightsForScoring(insights);
   emitPipelineStep(jobId, 'extract-insights', 'complete');
 
+  // Pre-generate banned words for each voice
+  const voiceBannedWords = new Map<string, string[]>();
+  await Promise.all(selectedVoices.map(async (voice) => {
+    voiceBannedWords.set(voice.id, await getBannedWordsForVoice(voice, insights));
+  }));
+
   // Step 2: Community Deep Research — practitioner pain is the foundation
   emitPipelineStep(jobId, 'community-research', 'running');
   updateJobProgress(jobId, { currentStep: 'Running community Deep Research...', progress: 5 });
@@ -696,7 +709,8 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
     const template = loadTemplate(assetType);
     for (const voice of selectedVoices) {
       const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
-      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
+      const bannedWords = voiceBannedWords.get(voice.id);
+      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel, undefined, bannedWords);
 
       try {
         // Step 3: Generate pain-grounded first draft
@@ -840,6 +854,12 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
   const scoringContext = formatInsightsForScoring(insights);
   emitPipelineStep(jobId, 'extract-insights', 'complete');
 
+  // Pre-generate banned words for each voice
+  const voiceBannedWords = new Map<string, string[]>();
+  await Promise.all(selectedVoices.map(async (voice) => {
+    voiceBannedWords.set(voice.id, await getBannedWordsForVoice(voice, insights));
+  }));
+
   // Step 2: Community research first
   emitPipelineStep(jobId, 'community-research', 'running');
   updateJobProgress(jobId, { currentStep: 'Running community deep research...', progress: 5 });
@@ -872,7 +892,8 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
     const template = loadTemplate(assetType);
     for (const voice of selectedVoices) {
       const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
-      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
+      const bannedWords = voiceBannedWords.get(voice.id);
+      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel, undefined, bannedWords);
       const userPrompt = buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel);
       const productInsightsText = formatInsightsForPrompt(insights);
 
@@ -988,6 +1009,12 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
   const scoringContext = formatInsightsForScoring(insights);
   emitPipelineStep(jobId, 'extract-insights', 'complete');
 
+  // Pre-generate banned words for each voice
+  const voiceBannedWords = new Map<string, string[]>();
+  await Promise.all(selectedVoices.map(async (voice) => {
+    voiceBannedWords.set(voice.id, await getBannedWordsForVoice(voice, insights));
+  }));
+
   // Step 2: Community Deep Research + Competitive Research in parallel
   emitPipelineStep(jobId, 'research', 'running');
   updateJobProgress(jobId, { currentStep: 'Running community & competitive research...', progress: 5 });
@@ -1014,7 +1041,8 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
     const template = loadTemplate(assetType);
     for (const voice of selectedVoices) {
       const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
-      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel);
+      const bannedWords = voiceBannedWords.get(voice.id);
+      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel, undefined, bannedWords);
 
       try {
         // Step 3: Generate 3 perspectives in parallel
@@ -1368,7 +1396,55 @@ Lead with the thesis or contrarian take. Make the reader think "that's a bold bu
   return result;
 }
 
-export function buildSystemPrompt(voice: any, assetType: AssetType, evidenceLevel?: EvidenceBundle['evidenceLevel'], pipeline?: 'standard' | 'outside-in'): string {
+// ---------------------------------------------------------------------------
+// Dynamic Banned Words — Flash call to generate voice+domain-specific banned words
+// ---------------------------------------------------------------------------
+
+const DEFAULT_BANNED_WORDS = [
+  "industry-leading", "best-in-class", "next-generation", "enterprise-grade",
+  "mission-critical", "turnkey", "end-to-end", "single pane of glass",
+  "seamless", "robust", "leverage", "cutting-edge", "game-changer"
+];
+
+async function generateBannedWords(voice: any, insights: ExtractedInsights): Promise<string[]> {
+  const prompt = `Given this voice profile and product domain, list 15-20 specific words and phrases that would sound inauthentic, vendor-heavy, or like AI-generated marketing copy to the target audience. Return ONLY a JSON array of strings.
+
+Voice: ${voice.name} — ${voice.description}
+${voice.voiceGuide ? `Voice Guide: ${voice.voiceGuide.substring(0, 500)}` : ''}
+Domain: ${insights.domain} / ${insights.category}
+Target personas: ${insights.targetPersonas.join(', ')}
+
+Return ONLY a JSON array like: ["phrase1", "phrase2", ...]`;
+
+  try {
+    const response = await generateWithGemini(prompt, { temperature: 0.2 });
+    const parsed = JSON.parse(response.text.replace(/```json?\n?/g, '').replace(/```/g, '').trim());
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      logger.info('Generated dynamic banned words', { voice: voice.name, count: parsed.length });
+      return parsed;
+    }
+    return DEFAULT_BANNED_WORDS;
+  } catch (err) {
+    logger.warn('Failed to generate dynamic banned words, using defaults', {
+      voice: voice.name,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return DEFAULT_BANNED_WORDS;
+  }
+}
+
+// Cache: voiceId:domain -> banned words (per-process, cleared on restart)
+const bannedWordsCache = new Map<string, string[]>();
+
+export async function getBannedWordsForVoice(voice: any, insights: ExtractedInsights): Promise<string[]> {
+  const cacheKey = `${voice.id}:${insights.domain || 'unknown'}`;
+  if (bannedWordsCache.has(cacheKey)) return bannedWordsCache.get(cacheKey)!;
+  const words = await generateBannedWords(voice, insights);
+  bannedWordsCache.set(cacheKey, words);
+  return words;
+}
+
+export function buildSystemPrompt(voice: any, assetType: AssetType, evidenceLevel?: EvidenceBundle['evidenceLevel'], pipeline?: 'standard' | 'outside-in', bannedWords?: string[]): string {
   let typeInstructions = '';
 
   if (assetType === 'messaging_template') {
@@ -1425,7 +1501,7 @@ ${typeInstructions}
 5. Every claim must be traceable to the product docs or research
 6. Sound like someone who understands the practitioner's world, not someone selling to them
 7. Be specific — names, numbers, scenarios. Vague messaging is bad messaging.
-8. Avoid language that would feel inauthentic or vendor-heavy to the target audience of this voice profile. You understand what sounds fake to practitioners in this field — don't use it. When in doubt, ask yourself: would the target persona actually say this to a peer? If not, rephrase it.
+8. DO NOT use: ${(bannedWords ?? DEFAULT_BANNED_WORDS).map(w => `"${w}"`).join(", ")}
 
 ## Evidence Grounding Rules
 ${evidenceLevel === 'product-only' ? `CRITICAL: You have NO community evidence for this generation. Do NOT fabricate practitioner quotes or use phrases like "practitioners say...", "as one engineer noted...", "community sentiment suggests...", "teams report...", or "according to engineers on Reddit...". Write from product documentation only. Where practitioner validation would strengthen a point, write: "[Needs community validation]".` : `You have real community evidence in the prompt. ONLY reference practitioners and quotes from the "Verified Community Evidence" section. Do NOT fabricate additional quotes or community references beyond what is provided. Every practitioner reference must come from that section.`}`;

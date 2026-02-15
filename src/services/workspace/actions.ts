@@ -24,6 +24,7 @@ import {
   loadTemplate,
   generateContent,
   ASSET_TYPE_TEMPERATURE,
+  getBannedWordsForVoice,
 } from '../../api/generate.js';
 
 const logger = createLogger('workspace:actions');
@@ -272,11 +273,14 @@ export async function runRegenerateAction(sessionId: string, assetType: string):
   // community Deep Research (that's what the community_check action is for)
   const evidenceLevel: 'strong' | 'partial' | 'product-only' = researchContext ? 'partial' : 'product-only';
 
+  // Generate dynamic banned words for this voice + domain
+  const bannedWords = await getBannedWordsForVoice(voice, insights);
+
   // Load the asset type template
   const template = loadTemplate(assetType as AssetType);
 
   // Build full prompts — identical to the original generation pipeline
-  const systemPrompt = buildSystemPrompt(voice, assetType as AssetType, evidenceLevel);
+  const systemPrompt = buildSystemPrompt(voice, assetType as AssetType, evidenceLevel, undefined, bannedWords);
   const userPrompt = buildUserPrompt(
     existingMessaging,
     session.focusInstructions ?? undefined,
@@ -626,7 +630,8 @@ export async function runMultiPerspectiveAction(sessionId: string, assetType: st
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   const scoringContext = formatInsightsForScoring(insights);
   const template = loadTemplate(assetType as AssetType);
-  const systemPrompt = buildSystemPrompt(voice, assetType as AssetType);
+  const bannedWords = await getBannedWordsForVoice(voice, insights);
+  const systemPrompt = buildSystemPrompt(voice, assetType as AssetType, undefined, undefined, bannedWords);
   const selectedModel = JSON.parse(session.metadata || '{}').model;
 
   const baseContent = active.content;
