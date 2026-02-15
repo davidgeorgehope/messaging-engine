@@ -8,6 +8,7 @@ interface PipelineStep {
   completedAt?: string;
   draft?: string;
   scores?: Record<string, number>;
+  model?: string;
 }
 
 interface Props {
@@ -103,6 +104,11 @@ export default function PipelineProgress({ sessionId, isGenerating }: Props) {
                   <span className="text-xs text-gray-400">
                     {elapsed(s.startedAt, s.completedAt)}
                   </span>
+                  {s.model && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 font-mono">
+                      {s.model.replace("gemini-", "").replace("-preview", "")}
+                    </span>
+                  )}
                   {hasScores && (
                     <div className="flex gap-1">
                       {Object.entries(s.scores!).map(([k, v]) => (

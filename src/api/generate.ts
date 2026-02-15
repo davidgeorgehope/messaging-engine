@@ -253,18 +253,19 @@ async function loadJobInputs(jobId: string): Promise<JobInputs> {
 // Pipeline Step Events — for live streaming UI
 // ---------------------------------------------------------------------------
 
-function emitPipelineStep(jobId: string, step: string, status: 'running' | 'complete', data?: { draft?: string; scores?: any }) {
+function emitPipelineStep(jobId: string, step: string, status: 'running' | 'complete', data?: { draft?: string; scores?: any; model?: string }) {
   const db = getDatabase();
   const job = db.select().from(generationJobs).where(eq(generationJobs.id, jobId)).get();
   const steps = JSON.parse((job as any)?.pipelineSteps || '[]');
 
   if (status === 'running') {
-    steps.push({ step, status, startedAt: new Date().toISOString() });
+    steps.push({ step, status, startedAt: new Date().toISOString(), ...(data?.model && { model: data.model }) });
   } else {
     const existing = steps.findLast((s: any) => s.step === step);
     if (existing) {
       existing.status = 'complete';
       existing.completedAt = new Date().toISOString();
+      if (data?.model) existing.model = data.model;
       if (data?.draft) existing.draft = data.draft.substring(0, 2000);
       if (data?.scores) existing.scores = data.scores;
     }
@@ -584,7 +585,7 @@ async function runStraightThroughPipeline(jobId: string, inputs: JobInputs): Pro
   let completedItems = 0;
 
   // Step 0: Extract insights (needed for scoring context)
-  emitPipelineStep(jobId, 'extract-insights', 'running');
+  emitPipelineStep(jobId, 'extract-insights', 'running', { model: getModelForTask('flash') });
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 5 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(() => {});
@@ -636,7 +637,7 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
   let completedItems = 0;
 
   // Step 0: Deep PoV Extraction (Gemini Pro — deeper narrative analysis)
-  emitPipelineStep(jobId, 'deep-pov-extraction', 'running');
+  emitPipelineStep(jobId, 'deep-pov-extraction', 'running', { model: getModelForTask('pro') });
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting deep product PoV (thesis, narrative, claims)...', progress: 2 });
   const povInsights = await extractDeepPoV(productDocs);
   const insights: ExtractedInsights = povInsights ?? await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
@@ -654,13 +655,13 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
   }));
 
   // Step 1: Community research — purpose is VALIDATION of our PoV, not discovery
-  emitPipelineStep(jobId, 'community-validation', 'running');
+  emitPipelineStep(jobId, 'community-validation', 'running', { model: getModelForTask('flash') });
   updateJobProgress(jobId, { currentStep: 'Validating PoV against community reality...', progress: 5 });
   const evidence = await runCommunityDeepResearch(insights, prompt);
   emitPipelineStep(jobId, 'community-validation', 'complete');
 
   // Step 2: Competitive research — informed by community findings
-  emitPipelineStep(jobId, 'competitive-research', 'running');
+  emitPipelineStep(jobId, 'competitive-research', 'running', { model: getModelForTask('flash') });
   updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 10 });
   let competitivePromptExtra = prompt || '';
   if (evidence.communityContextText) {
@@ -675,7 +676,7 @@ async function runStandardPipeline(jobId: string, inputs: JobInputs): Promise<vo
   emitPipelineStep(jobId, 'competitive-research', 'complete');
 
   // Step 3: Generate from YOUR narrative (PoV-first)
-  emitPipelineStep(jobId, 'generate', 'running');
+  emitPipelineStep(jobId, 'generate', 'running', { model: getModelForTask('pro') });
   updateJobProgress(jobId, { currentStep: 'Generating from product narrative...', progress: 18 });
 
   for (const assetType of selectedAssetTypes) {
@@ -733,7 +734,7 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
   let completedItems = 0;
 
   // Step 1: Extract insights
-  emitPipelineStep(jobId, 'extract-insights', 'running');
+  emitPipelineStep(jobId, 'extract-insights', 'running', { model: getModelForTask('flash') });
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
@@ -749,7 +750,7 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
   }));
 
   // Step 2: Community Deep Research — practitioner pain is the foundation
-  emitPipelineStep(jobId, 'community-research', 'running');
+  emitPipelineStep(jobId, 'community-research', 'running', { model: getModelForTask('flash') });
   updateJobProgress(jobId, { currentStep: 'Running community Deep Research...', progress: 5 });
   const evidence = await runCommunityDeepResearch(insights, prompt);
   emitPipelineStep(jobId, 'community-research', 'complete');
@@ -779,7 +780,7 @@ async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Promise<v
 
         const painFirstPrompt = buildPainFirstPrompt(practitionerContext, template, assetType, insights);
         const firstDraftResponse = await generateContent(painFirstPrompt, { systemPrompt, temperature: ASSET_TYPE_TEMPERATURE[assetType] ?? 0.7 }, selectedModel);
-        emitPipelineStep(jobId, `pain-draft-${assetType}-${voice.slug}`, 'complete', { draft: firstDraftResponse.text });
+        emitPipelineStep(jobId, `pain-draft-${assetType}-${voice.slug}`, 'complete', { draft: firstDraftResponse.text, model: firstDraftResponse.model });
 
         // Step 4: Competitive research (with draft context for targeting)
         emitPipelineStep(jobId, `competitive-research-${assetType}-${voice.slug}`, 'running');
@@ -808,7 +809,7 @@ ${competitiveContext.substring(0, 5000)}
 5. Output ONLY the updated content`;
 
         const enrichedResponse = await generateContent(enrichCompetitivePrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
-        emitPipelineStep(jobId, `enrich-competitive-${assetType}-${voice.slug}`, 'complete', { draft: enrichedResponse.text });
+        emitPipelineStep(jobId, `enrich-competitive-${assetType}-${voice.slug}`, 'complete', { draft: enrichedResponse.text, model: enrichedResponse.model });
 
         // Step 6: Layer in product specifics
         emitPipelineStep(jobId, `layer-product-${assetType}-${voice.slug}`, 'running');
@@ -834,7 +835,7 @@ ${template}
 5. Output ONLY the final content`;
 
         const layeredResponse = await generateContent(layerProductPrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
-        emitPipelineStep(jobId, `layer-product-${assetType}-${voice.slug}`, 'complete', { draft: layeredResponse.text });
+        emitPipelineStep(jobId, `layer-product-${assetType}-${voice.slug}`, 'complete', { draft: layeredResponse.text, model: layeredResponse.model });
 
         // Step 7: Refinement loop
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'running');
@@ -905,7 +906,7 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
   let completedItems = 0;
 
   // Step 1: Extract insights
-  emitPipelineStep(jobId, 'extract-insights', 'running');
+  emitPipelineStep(jobId, 'extract-insights', 'running', { model: getModelForTask('flash') });
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
@@ -921,13 +922,13 @@ async function runAdversarialPipeline(jobId: string, inputs: JobInputs): Promise
   }));
 
   // Step 2: Community research first
-  emitPipelineStep(jobId, 'community-research', 'running');
+  emitPipelineStep(jobId, 'community-research', 'running', { model: getModelForTask('flash') });
   updateJobProgress(jobId, { currentStep: 'Running community deep research...', progress: 5 });
   const evidence = await runCommunityDeepResearch(insights, prompt);
   emitPipelineStep(jobId, 'community-research', 'complete');
 
   // Step 3: Competitive research informed by community findings
-  emitPipelineStep(jobId, 'competitive-research', 'running');
+  emitPipelineStep(jobId, 'competitive-research', 'running', { model: getModelForTask('flash') });
   updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 10 });
   let competitivePromptExtra = prompt || '';
   if (evidence.communityContextText) {
@@ -1060,7 +1061,7 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
   let completedItems = 0;
 
   // Step 1: Extract insights
-  emitPipelineStep(jobId, 'extract-insights', 'running');
+  emitPipelineStep(jobId, 'extract-insights', 'running', { model: getModelForTask('flash') });
   updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
@@ -1076,7 +1077,7 @@ async function runMultiPerspectivePipeline(jobId: string, inputs: JobInputs): Pr
   }));
 
   // Step 2: Community Deep Research + Competitive Research in parallel
-  emitPipelineStep(jobId, 'research', 'running');
+  emitPipelineStep(jobId, 'research', 'running', { model: getModelForTask('flash') });
   updateJobProgress(jobId, { currentStep: 'Running community & competitive research...', progress: 5 });
 
   const [evidence, competitiveResult] = await Promise.all([
@@ -1163,7 +1164,7 @@ ${template}
 Output ONLY the synthesized content. No meta-commentary.`;
 
         const synthesizedResponse = await generateContent(synthesizePrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
-        emitPipelineStep(jobId, `synthesize-${assetType}-${voice.slug}`, 'complete', { draft: synthesizedResponse.text });
+        emitPipelineStep(jobId, `synthesize-${assetType}-${voice.slug}`, 'complete', { draft: synthesizedResponse.text, model: synthesizedResponse.model });
 
         // Step 5: Refinement loop on the synthesized output
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'running');
