@@ -1,7 +1,7 @@
 {
   "name": "messaging-engine",
   "version": "1.0.0",
-  "description": "PMM Messaging Engine — converts practitioner pain points into scored, traceable messaging assets",
+  "description": "PMM Messaging Engine \u2014 converts practitioner pain points into scored, traceable messaging assets",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -13,8 +13,8 @@
     "db:studio": "drizzle-kit studio",
     "admin:dev": "cd admin && npm run dev",
     "admin:build": "cd admin && npm run build",
-    "test": "vitest run",
-    "test:unit": "vitest run tests/unit/",
+    "test": "MODEL_PROFILE=test vitest run",
+    "test:unit": "MODEL_PROFILE=test vitest run tests/unit/",
     "test:e2e": "MODEL_PROFILE=test vitest run tests/e2e/ --test-timeout 900000"
   },
   "dependencies": {
