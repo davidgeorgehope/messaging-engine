@@ -2,7 +2,7 @@ import type { VoiceProfile, ScoringThresholds } from '../../types/index.js';
 // Pipeline prompt builders, templates, and constants
 // Extracted from src/api/generate.ts
 
-import { readFileSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { join } from 'path';
 import type { AssetType } from '../../services/generation/types.js';
 import type { ExtractedInsights, DeepPoVInsights } from '../../services/product/insights.js';
@@ -41,10 +41,10 @@ export const ASSET_TYPE_LABELS: Record<AssetType, string> = {
   narrative: 'Narrative',
 };
 
-export function loadTemplate(assetType: AssetType): string {
+export async function loadTemplate(assetType: AssetType): Promise<string> {
   try {
     const filename = assetType.replace(/_/g, '-') + '.md';
-    return readFileSync(join(TEMPLATE_DIR, filename), 'utf-8');
+    return await readFile(join(TEMPLATE_DIR, filename), 'utf-8');
   } catch {
     return `Generate ${ASSET_TYPE_LABELS[assetType] || assetType} content.`;
   }

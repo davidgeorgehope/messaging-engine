@@ -256,7 +256,7 @@ export async function runRegenerateAction(sessionId: string, assetType: string):
   logger.info('Running regenerate action', { sessionId, assetType });
 
   const voice = await loadSessionVoice(session);
-  const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
+  const thresholds = parseScoringThresholds(voice.scoringThresholds);
 
   // Extract product insights
   const productDocs = await loadSessionProductDocs(session);
@@ -282,7 +282,7 @@ export async function runRegenerateAction(sessionId: string, assetType: string):
 
   const evidenceLevel: 'strong' | 'partial' | 'product-only' = researchContext ? 'partial' : 'product-only';
   const bannedWords = await getBannedWordsForVoice(voice, insights);
-  const template = loadTemplate(assetType as AssetType);
+  const template = await loadTemplate(assetType as AssetType);
 
   // Build prompts — same functions used by all pipelines
   const systemPrompt = buildSystemPrompt(voice, assetType as AssetType, evidenceLevel, undefined, bannedWords);
@@ -366,7 +366,7 @@ export async function runVoiceChangeAction(sessionId: string, assetType: string,
   });
 
   const scores = await scoreContent(response.text);
-  const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
+  const thresholds = parseScoringThresholds(voice.scoringThresholds);
 
   const version = await createVersionAndActivate(sessionId, assetType, response.text, 'voice_change', {
     previousVoice: active.source,
@@ -615,11 +615,11 @@ export async function runMultiPerspectiveAction(sessionId: string, assetType: st
   logger.info('Running multi-perspective action', { sessionId, assetType });
 
   const voice = await loadSessionVoice(session);
-  const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
+  const thresholds = parseScoringThresholds(voice.scoringThresholds);
   const productDocs = await loadSessionProductDocs(session);
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   const scoringContext = formatInsightsForScoring(insights);
-  const template = loadTemplate(assetType as AssetType);
+  const template = await loadTemplate(assetType as AssetType);
   const bannedWords = await getBannedWordsForVoice(voice, insights);
   const systemPrompt = buildSystemPrompt(voice, assetType as AssetType, undefined, undefined, bannedWords);
   const selectedModel = JSON.parse(session.metadata || '{}').model;

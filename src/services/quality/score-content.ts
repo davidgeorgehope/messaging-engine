@@ -61,10 +61,10 @@ export async function scoreContent(content: string, productDocs: string[] = []):
   }
 
   return {
-    slopScore: (slopAnalysis as any).score,
-    vendorSpeakScore: (vendorAnalysis as any).score,
-    authenticityScore: (authenticityAnalysis as any).score,
-    specificityScore: (specificityAnalysis as any).score,
+    slopScore: slopAnalysis.score,
+    vendorSpeakScore: vendorAnalysis.score,
+    authenticityScore: authenticityAnalysis.score,
+    specificityScore: specificityAnalysis.score,
     personaAvgScore: Math.round(personaAvg * 10) / 10,
     slopAnalysis,
     scorerHealth,

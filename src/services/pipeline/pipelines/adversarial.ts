@@ -1,3 +1,4 @@
+import { parseScoringThresholds } from '../../../types/index.js';
 // Pipeline: Adversarial (generate, 2 rounds attack/defend, refinement loop)
 // Extracted from src/api/generate.ts
 
@@ -62,9 +63,9 @@ export async function runAdversarialPipeline(jobId: string, inputs: JobInputs): 
   updateJobProgress(jobId, { currentStep: 'Generating initial drafts...', progress: 18 });
 
   for (const assetType of selectedAssetTypes) {
-    const template = loadTemplate(assetType);
+    const template = await loadTemplate(assetType);
     for (const voice of selectedVoices) {
-      const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
+      const thresholds = parseScoringThresholds(voice.scoringThresholds);
       const bannedWords = voiceBannedWords.get(voice.id);
       const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel, undefined, bannedWords);
       const userPrompt = buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel);

@@ -1,3 +1,4 @@
+import { parseScoringThresholds } from '../../../types/index.js';
 // Pipeline: Outside-In (practitioner pain first, layered enrichment)
 // Extracted from src/api/generate.ts
 
@@ -50,9 +51,9 @@ export async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Pr
   updateJobProgress(jobId, { currentStep: 'Generating pain-grounded drafts...', progress: 15 });
 
   for (const assetType of selectedAssetTypes) {
-    const template = loadTemplate(assetType);
+    const template = await loadTemplate(assetType);
     for (const voice of selectedVoices) {
-      const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
+      const thresholds = parseScoringThresholds(voice.scoringThresholds);
       const bannedWords = voiceBannedWords.get(voice.id);
       const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel, undefined, bannedWords);
 

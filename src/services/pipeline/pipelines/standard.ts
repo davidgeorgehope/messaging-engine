@@ -1,3 +1,4 @@
+import { parseScoringThresholds } from '../../../types/index.js';
 // Pipeline: Standard (Research → Generate → Refinement Loop → Store)
 // Extracted from src/api/generate.ts
 
@@ -61,11 +62,11 @@ export async function runStandardPipeline(jobId: string, inputs: JobInputs): Pro
   updateJobProgress(jobId, { currentStep: 'Generating from product narrative...', progress: 18 });
 
   for (const assetType of selectedAssetTypes) {
-    const template = loadTemplate(assetType);
+    const template = await loadTemplate(assetType);
     for (const voice of selectedVoices) {
       updateJobProgress(jobId, { currentStep: `Generating ${ASSET_TYPE_LABELS[assetType]} — ${voice.name}` });
 
-      const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
+      const thresholds = parseScoringThresholds(voice.scoringThresholds);
 
       const bannedWords = voiceBannedWords.get(voice.id);
       const systemPrompt = deepPoV

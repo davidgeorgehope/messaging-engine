@@ -1,3 +1,4 @@
+import { parseScoringThresholds } from '../../../types/index.js';
 // Pipeline: Straight Through (extract insights → score existing content, no generation)
 // Extracted from src/api/generate.ts
 
@@ -37,7 +38,7 @@ export async function runStraightThroughPipeline(jobId: string, inputs: JobInput
       emitPipelineStep(jobId, `score-${assetType}-${voice.slug}`, 'running');
       updateJobProgress(jobId, { currentStep: `Scoring ${ASSET_TYPE_LABELS[assetType]} — ${voice.name}` });
 
-      const thresholds = JSON.parse(voice.scoringThresholds || '{"slopMax":5,"vendorSpeakMax":5,"authenticityMin":6,"specificityMin":6,"personaMin":6}');
+      const thresholds = parseScoringThresholds(voice.scoringThresholds);
 
       try {
         const scores = await scoreContent(existingMessaging, [scoringContext]);
