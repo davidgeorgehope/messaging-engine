@@ -132,6 +132,8 @@ export async function generateWithClaude(
 
   await claudeRateLimiter.acquire();
 
+  logger.info('Claude call', { model, promptLength: prompt.length });
+
   const startTime = performance.now();
 
   try {
@@ -208,6 +210,8 @@ export async function generateWithGemini(
   const isProModel = options.useProModel || (options.model && options.model.includes("pro"));
 
   await (isProModel ? geminiProRateLimiter : geminiFlashRateLimiter).acquire();
+
+  logger.info('Gemini call', { model, promptLength: prompt.length });
 
   const startTime = performance.now();
 
@@ -291,6 +295,7 @@ export async function generateWithGeminiGroundedSearch(
 
   await geminiFlashRateLimiter.acquire();
 
+  logger.info('Gemini search call', { model, promptLength: prompt.length });
   const startTime = performance.now();
 
   try {
