@@ -18,7 +18,6 @@ describe('naming prompt — real Gemini call', () => {
 
     const result = await generateWithGemini(prompt, {
       temperature: 0.3,
-      maxTokens: 50,
     });
 
     console.log('\n=== RESPONSE ===');
@@ -39,7 +38,6 @@ describe('naming prompt — real Gemini call', () => {
 
     const result = await generateWithGemini(prompt, {
       temperature: 0.3,
-      maxTokens: 50,
     });
 
     console.log('\n=== RESPONSE ===');
@@ -58,7 +56,6 @@ describe('naming prompt — real Gemini call', () => {
     for (let i = 0; i < 5; i++) {
       const result = await generateWithGemini(prompt, {
         temperature: 0.3,
-        maxTokens: 50,
       });
       results.push(result.text);
       console.log(`Run ${i + 1}: text=${JSON.stringify(result.text)} finishReason=${result.finishReason}`);
