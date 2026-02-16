@@ -35,7 +35,7 @@ export async function runMultiPerspectivePipeline(jobId: string, inputs: JobInpu
 
   // Step 2: Community + Competitive Research in parallel
   emitPipelineStep(jobId, 'research', 'running', { model: getModelForTask('flash') });
-  updateJobProgress(jobId, { currentStep: 'Running community & competitive research...', progress: 5 });
+  updateJobProgress(jobId, { currentStep: `Running community & competitive research... [${getModelForTask('deepResearch')}]`, progress: 5 });
 
   const [evidence, competitiveResult] = await Promise.all([
     runCommunityDeepResearch(insights, prompt),

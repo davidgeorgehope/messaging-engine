@@ -36,7 +36,7 @@ export async function runAdversarialPipeline(jobId: string, inputs: JobInputs): 
 
   // Step 2: Community research
   emitPipelineStep(jobId, 'community-research', 'running', { model: getModelForTask('flash') });
-  updateJobProgress(jobId, { currentStep: 'Running community deep research...', progress: 5 });
+  updateJobProgress(jobId, { currentStep: `Running community deep research... [${getModelForTask('deepResearch')}]`, progress: 5 });
   const evidence = await runCommunityDeepResearch(insights, prompt);
   emitPipelineStep(jobId, 'community-research', 'complete');
 

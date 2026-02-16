@@ -35,7 +35,7 @@ export async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Pr
 
   // Step 2: Community Deep Research (with retries)
   emitPipelineStep(jobId, 'community-research', 'running', { model: getModelForTask('flash') });
-  updateJobProgress(jobId, { currentStep: `Running community research... [${getModelForTask('flash')}]`, progress: 5 });
+  updateJobProgress(jobId, { currentStep: `Running community research... [${getModelForTask('deepResearch')}]`, progress: 5 });
 
   const MAX_EVIDENCE_RETRIES = 3;
   let evidence = await runCommunityDeepResearch(insights, prompt);
@@ -43,7 +43,7 @@ export async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Pr
   // Retry the entire community research call if we got nothing
   for (let attempt = 1; attempt <= MAX_EVIDENCE_RETRIES && evidence.evidenceLevel === 'product-only'; attempt++) {
     logger.warn('Community research returned no evidence, retrying', { jobId, attempt, maxRetries: MAX_EVIDENCE_RETRIES });
-    updateJobProgress(jobId, { currentStep: `Community research returned empty — retry ${attempt}/${MAX_EVIDENCE_RETRIES}...` });
+    updateJobProgress(jobId, { currentStep: `Community research empty — retry ${attempt}/${MAX_EVIDENCE_RETRIES} [${getModelForTask('deepResearch')}]` });
     await new Promise(r => setTimeout(r, 3000 * attempt));
     evidence = await runCommunityDeepResearch(insights, prompt);
   }
