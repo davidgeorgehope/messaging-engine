@@ -18,6 +18,9 @@ import { runPublicGenerationJob } from '../../src/api/generate.js';
 // Utils
 import { generateId } from '../../src/utils/hash.js';
 
+// Spirit validation — LLM-based scoring of pipeline intent fidelity
+import { scorePipelineSpirit, SPIRIT_THRESHOLDS } from './spirit-scoring.js';
+
 // Verify test profile is active
 import { getActiveModelProfile, getModelForTask } from '../../src/config.js';
 
@@ -165,7 +168,10 @@ describe('All 5 Pipelines E2E (Flash model profile)', () => {
     const stepNames = steps.map((s: any) => s.step);
     expect(stepNames).toContain('deep-pov-extraction');
 
-    console.log(`  Standard: ${assets[0].content.length} chars, steps=${stepNames.join(',')}`);
+    // Spirit validation
+    const spiritScore = await scorePipelineSpirit('standard', assets[0].content, TEST_PRODUCT_DOCS);
+    console.log(`  Standard: ${assets[0].content.length} chars, spirit=${JSON.stringify(spiritScore)}`);
+    expect(spiritScore.fidelityScore).toBeGreaterThanOrEqual(SPIRIT_THRESHOLDS['standard'].minFidelity);
   }, 600_000);
 
   it('outside-in pipeline: community-first sequential DAG', async () => {
@@ -189,7 +195,13 @@ describe('All 5 Pipelines E2E (Flash model profile)', () => {
     const hasCommunityStep = stepNames.includes('community-research') || stepNames.includes('deep-pov-extraction');
     expect(hasCommunityStep).toBe(true);
 
-    console.log(`  Outside-in: ${assets[0].content.length} chars, steps=${stepNames.join(',')}`);
+    // Spirit validation — outside-in should be practitioner-driven, not product-doc-driven
+    const spiritScore = await scorePipelineSpirit('outside-in', assets[0].content, TEST_PRODUCT_DOCS);
+    console.log(`  Outside-in: ${assets[0].content.length} chars, spirit=${JSON.stringify(spiritScore)}`);
+    const thresholds = SPIRIT_THRESHOLDS['outside-in'];
+    expect(spiritScore.fidelityScore).toBeGreaterThanOrEqual(thresholds.minFidelity);
+    expect(spiritScore.productDocInfluence).toBeLessThanOrEqual(thresholds.maxProductInfluence!);
+    expect(spiritScore.practitionerVoice).toBeGreaterThanOrEqual(thresholds.minPractitionerVoice!);
   }, 600_000);
 
   it('adversarial pipeline: 2 rounds of attack/defend', async () => {
@@ -214,7 +226,10 @@ describe('All 5 Pipelines E2E (Flash model profile)', () => {
     expect(hasAttack).toBe(true);
     expect(hasDefend).toBe(true);
 
-    console.log(`  Adversarial: ${assets[0].content.length} chars, attack/defend steps found`);
+    // Spirit validation
+    const spiritScore = await scorePipelineSpirit('adversarial', assets[0].content, TEST_PRODUCT_DOCS);
+    console.log(`  Adversarial: ${assets[0].content.length} chars, spirit=${JSON.stringify(spiritScore)}`);
+    expect(spiritScore.fidelityScore).toBeGreaterThanOrEqual(SPIRIT_THRESHOLDS['adversarial'].minFidelity);
   }, 600_000);
 
   it('multi-perspective pipeline: 3 angles + synthesis', async () => {
@@ -239,6 +254,9 @@ describe('All 5 Pipelines E2E (Flash model profile)', () => {
     expect(hasPerspectives).toBe(true);
     expect(hasSynthesize).toBe(true);
 
-    console.log(`  Multi-perspective: ${assets[0].content.length} chars, perspectives+synthesis found`);
+    // Spirit validation
+    const spiritScore = await scorePipelineSpirit('multi-perspective', assets[0].content, TEST_PRODUCT_DOCS);
+    console.log(`  Multi-perspective: ${assets[0].content.length} chars, spirit=${JSON.stringify(spiritScore)}`);
+    expect(spiritScore.fidelityScore).toBeGreaterThanOrEqual(SPIRIT_THRESHOLDS['multi-perspective'].minFidelity);
   }, 600_000);
 });
