@@ -300,7 +300,7 @@ export async function generateWithGeminiGroundedSearch(
 
   try {
     // Retry wrapper that also retries on empty grounded search results
-    const MAX_EMPTY_RETRIES = 2;
+    const MAX_EMPTY_RETRIES = 5;
     let response: any;
     let emptyRetries = 0;
 

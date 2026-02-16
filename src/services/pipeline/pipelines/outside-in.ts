@@ -33,17 +33,28 @@ export async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Pr
     voiceBannedWords.set(voice.id, await getBannedWordsForVoice(voice, insights));
   }));
 
-  // Step 2: Community Deep Research
+  // Step 2: Community Deep Research (with retries)
   emitPipelineStep(jobId, 'community-research', 'running', { model: getModelForTask('flash') });
   updateJobProgress(jobId, { currentStep: 'Running community Deep Research...', progress: 5 });
-  const evidence = await runCommunityDeepResearch(insights, prompt);
+
+  const MAX_EVIDENCE_RETRIES = 3;
+  let evidence = await runCommunityDeepResearch(insights, prompt);
+
+  // Retry the entire community research call if we got nothing
+  for (let attempt = 1; attempt <= MAX_EVIDENCE_RETRIES && evidence.evidenceLevel === 'product-only'; attempt++) {
+    logger.warn('Community research returned no evidence, retrying', { jobId, attempt, maxRetries: MAX_EVIDENCE_RETRIES });
+    updateJobProgress(jobId, { currentStep: `Community research returned empty — retry ${attempt}/${MAX_EVIDENCE_RETRIES}...` });
+    await new Promise(r => setTimeout(r, 3000 * attempt));
+    evidence = await runCommunityDeepResearch(insights, prompt);
+  }
+
   emitPipelineStep(jobId, 'community-research', 'complete');
 
   let practitionerContext = evidence.communityContextText;
 
   if (evidence.evidenceLevel === 'product-only') {
-    logger.warn('Grounded search returned no community evidence — synthesizing from model knowledge', { jobId });
-    updateJobProgress(jobId, { currentStep: 'Synthesizing practitioner pain from model knowledge...' });
+    logger.warn('All community research retries exhausted — synthesizing from model knowledge', { jobId });
+    updateJobProgress(jobId, { currentStep: 'All retries exhausted — synthesizing practitioner pain from model knowledge...' });
 
     const discoveryContext = formatInsightsForDiscovery(insights);
     const synthesizePrompt = `You are a practitioner who works with tools in this space daily. Based on your deep knowledge of the community (Reddit r/devops, r/sre, r/kubernetes, Hacker News, Stack Overflow, GitHub Issues), describe the REAL pain points practitioners face.
