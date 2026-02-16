@@ -53,32 +53,8 @@ export async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Pr
   let practitionerContext = evidence.communityContextText;
 
   if (evidence.evidenceLevel === 'product-only') {
-    logger.warn('All community research retries exhausted — synthesizing from model knowledge', { jobId });
-    updateJobProgress(jobId, { currentStep: 'All retries exhausted — synthesizing practitioner pain from model knowledge...' });
-
-    const discoveryContext = formatInsightsForDiscovery(insights);
-    const synthesizePrompt = `You are a practitioner who works with tools in this space daily. Based on your deep knowledge of the community (Reddit r/devops, r/sre, r/kubernetes, Hacker News, Stack Overflow, GitHub Issues), describe the REAL pain points practitioners face.
-
-## Product Area
-${discoveryContext}
-
-${prompt ? `## Focus Area\n${prompt}\n` : ''}
-
-## Instructions
-Write as if you're summarizing dozens of real community threads you've read. Include:
-1. **Common Frustrations**: What practitioners actually complain about (use their language, not vendor language)
-2. **Failed Workarounds**: What people try that doesn't work
-3. **Wished-For Solutions**: What the community says they want
-4. **Real Scenarios**: Specific situations where current tools fail (on-call at 3am, pipeline breaks during deploy, etc.)
-
-Be raw, honest, and specific. Use practitioner language — "this sucks", "why can't we just...", "spent 3 hours debugging...". No marketing polish.`;
-
-    const synthesized = await generateContent(synthesizePrompt, { temperature: 0.8 }, selectedModel);
-    practitionerContext = `## Synthesized Practitioner Pain (from model knowledge)\n\n${synthesized.text}`;
-    evidence.evidenceLevel = 'partial';
-    evidence.communityContextText = practitionerContext;
-
-    emitPipelineStep(jobId, 'synthesize-pain', 'complete', { model: synthesized.model });
+    logger.error('All community research retries exhausted — no real evidence found, failing pipeline', { jobId });
+    throw new Error('Outside-in pipeline requires real community evidence. Grounded search returned no results after all retries. Try again or use a different pipeline.');
   }
 
   updateJobProgress(jobId, { currentStep: 'Generating pain-grounded drafts...', progress: 15 });
