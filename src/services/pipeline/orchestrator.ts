@@ -113,7 +113,6 @@ export async function generateContent(
   return generateWithGemini(prompt, {
     ...options,
     model: getModelForTask('pro'),
-    maxTokens: options.maxTokens ?? 16000,
   });
 }
 

@@ -80,7 +80,6 @@ Output ONLY the cleaned content.`;
     const response = await generateWithGemini(strippingPrompt, {
       model: getModelForTask('pro'),
       temperature: 0.3,
-      maxTokens: 16000,
     });
 
     return {

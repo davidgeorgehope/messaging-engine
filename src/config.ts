@@ -63,7 +63,6 @@ export const config = {
   ai: {
     claude: {
       model: 'claude-opus-4-6',
-      maxTokens: 16000,
     },
     gemini: {
       flashModel: 'gemini-3-flash-preview',

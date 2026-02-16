@@ -95,7 +95,7 @@ Return ONLY a JSON array like: ["phrase1", "phrase2", ...]`;
   const MAX_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const response = await generateWithGemini(prompt, { model: getModelForTask('flash'), temperature: 0.2, maxTokens: 1000 });
+      const response = await generateWithGemini(prompt, { model: getModelForTask('flash'), temperature: 0.2 });
       const cleaned = response.text.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleaned);
       if (Array.isArray(parsed) && parsed.length > 0) {

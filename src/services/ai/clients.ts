@@ -128,7 +128,7 @@ export async function generateWithClaude(
   options: GenerateOptions = {}
 ): Promise<AIResponse> {
   const model = options.model ?? config.ai.claude.model;
-  const maxTokens = options.maxTokens ?? config.ai.claude.maxTokens;
+  const maxTokens = options.maxTokens ?? 16384;
 
   await claudeRateLimiter.acquire();
 
@@ -228,7 +228,7 @@ export async function generateWithGemini(
             },
           ],
           config: {
-            maxOutputTokens: options.maxTokens ?? 8192,
+            ...(options.maxTokens ? { maxOutputTokens: options.maxTokens } : {}),
             temperature: options.temperature ?? 0.7,
             topP: options.topP,
             topK: options.topK,
@@ -317,7 +317,6 @@ export async function generateWithGeminiGroundedSearch(
               },
             ],
             config: {
-              maxOutputTokens: options.maxTokens ?? 8192,
               temperature: options.temperature ?? 0.3,
               tools: [{ googleSearch: {} }],
             },

@@ -86,7 +86,6 @@ app.post('/:id/chat', async (c) => {
           { role: 'user', parts: [{ text: userPrompt }] },
         ],
         config: {
-          maxOutputTokens: 4096,
           temperature: 0.7,
         },
       });
