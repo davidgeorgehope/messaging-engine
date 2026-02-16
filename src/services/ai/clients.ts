@@ -299,33 +299,52 @@ export async function generateWithGeminiGroundedSearch(
   const startTime = performance.now();
 
   try {
-    const response = await withRetry(
-      async () => {
-        const client = getGoogleClient();
-        return client.models.generateContent({
-          model,
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: options.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt }],
+    // Retry wrapper that also retries on empty grounded search results
+    const MAX_EMPTY_RETRIES = 2;
+    let response: any;
+    let emptyRetries = 0;
+
+    while (true) {
+      response = await withRetry(
+        async () => {
+          const client = getGoogleClient();
+          return client.models.generateContent({
+            model,
+            contents: [
+              {
+                role: 'user',
+                parts: [{ text: options.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt }],
+              },
+            ],
+            config: {
+              maxOutputTokens: options.maxTokens ?? 8192,
+              temperature: options.temperature ?? 0.3,
+              tools: [{ googleSearch: {} }],
             },
-          ],
-          config: {
-            maxOutputTokens: options.maxTokens ?? 8192,
-            temperature: options.temperature ?? 0.3,
-            tools: [{ googleSearch: {} }],
-          },
-        });
-      },
-      {
-        maxRetries: 3,
-        baseDelayMs: 2000,
-        retryOn: (error: Error) => {
-          const msg = error.message.toLowerCase();
-          return msg.includes('rate') || msg.includes('quota') || msg.includes('503');
+          });
         },
+        {
+          maxRetries: 3,
+          baseDelayMs: 2000,
+          retryOn: (error: Error) => {
+            const msg = error.message.toLowerCase();
+            return msg.includes('rate') || msg.includes('quota') || msg.includes('503');
+          },
+        }
+      );
+
+      // Retry if grounded search returned empty (flaky API behavior)
+      const responseText = response.text ?? '';
+      const hasChunks = (response.candidates?.[0] as any)?.groundingMetadata?.groundingChunks?.length > 0;
+      if (responseText.length === 0 && !hasChunks && emptyRetries < MAX_EMPTY_RETRIES) {
+        emptyRetries++;
+        logger.warn('Grounded search returned empty, retrying', { attempt: emptyRetries, maxRetries: MAX_EMPTY_RETRIES });
+        await new Promise(r => setTimeout(r, 3000 * emptyRetries));
+        await geminiFlashRateLimiter.acquire();
+        continue;
       }
-    );
+      break;
+    }
 
     const latencyMs = Math.round(performance.now() - startTime);
 
