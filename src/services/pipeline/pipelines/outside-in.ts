@@ -4,7 +4,7 @@ import { parseScoringThresholds } from '../../../types/index.js';
 
 import { createLogger } from '../../../utils/logger.js';
 import { getModelForTask } from '../../../config.js';
-import { extractInsights, buildFallbackInsights, formatInsightsForScoring, formatInsightsForPrompt } from '../../../services/product/insights.js';
+import { extractInsights, buildFallbackInsights, formatInsightsForScoring } from '../../../services/product/insights.js';
 import { nameSessionFromInsights } from '../../../services/workspace/sessions.js';
 import { loadTemplate, buildSystemPrompt, buildPainFirstPrompt, getBannedWordsForVoice, ASSET_TYPE_LABELS, ASSET_TYPE_TEMPERATURE } from '../prompts.js';
 import { runCommunityDeepResearch, runCompetitiveResearch } from '../evidence.js';
@@ -95,37 +95,11 @@ ${competitiveContext.substring(0, 5000)}
         const enrichedResponse = await generateContent(enrichCompetitivePrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
         emitPipelineStep(jobId, `enrich-competitive-${assetType}-${voice.slug}`, 'complete', { draft: enrichedResponse.text, model: enrichedResponse.model });
 
-        // Step 6: Layer in product specifics
-        emitPipelineStep(jobId, `layer-product-${assetType}-${voice.slug}`, 'running');
-        updateJobProgress(jobId, { currentStep: `Layering product specifics — ${voice.name}` });
-
-        const productInsightsText = formatInsightsForPrompt(insights);
-        const layerProductPrompt = `Here's the competitively-enriched draft. Here's detailed product intelligence. Add specific product capabilities, metrics, and claims where they strengthen the narrative. Don't vendor-speak it.
-
-## Competitively-Enriched Draft
-${enrichedResponse.text}
-
-## Product Intelligence
-${productInsightsText}
-
-## Template / Format Guide
-${template}
-
-## Rules
-1. Add specific product capabilities, metrics, and claims where they strengthen the narrative
-2. Don't turn it into a feature list — weave product specifics in naturally
-3. Keep the practitioner voice dominant
-4. Every product mention should answer "so what?" for the practitioner
-5. Output ONLY the final content`;
-
-        const layeredResponse = await generateContent(layerProductPrompt, { systemPrompt, temperature: 0.5 }, selectedModel);
-        emitPipelineStep(jobId, `layer-product-${assetType}-${voice.slug}`, 'complete', { draft: layeredResponse.text, model: layeredResponse.model });
-
-        // Step 7: Refinement loop
+        // Step 6: Refinement loop (product layering removed — outside-in keeps practitioner voice pure)
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'running');
         updateJobProgress(jobId, { currentStep: `Refining — ${voice.name}` });
 
-        const result = await refinementLoop(layeredResponse.text, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
+        const result = await refinementLoop(enrichedResponse.text, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores, scorerHealth: result.scores.scorerHealth });
 
         // Step 8: Store
