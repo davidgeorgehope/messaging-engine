@@ -4,12 +4,11 @@ import { parseScoringThresholds } from '../../../types/index.js';
 
 import { createLogger } from '../../../utils/logger.js';
 import { getModelForTask } from '../../../config.js';
-import { extractInsights, buildFallbackInsights, formatInsightsForScoring } from '../../../services/product/insights.js';
+import { extractInsights, buildFallbackInsights, formatInsightsForScoring, formatInsightsForDiscovery } from '../../../services/product/insights.js';
 import { nameSessionFromInsights } from '../../../services/workspace/sessions.js';
 import { loadTemplate, buildSystemPrompt, buildPainFirstPrompt, getBannedWordsForVoice, ASSET_TYPE_LABELS, ASSET_TYPE_TEMPERATURE } from '../prompts.js';
 import { runCommunityDeepResearch, runCompetitiveResearch } from '../evidence.js';
 import { emitPipelineStep, updateJobProgress, generateContent, refinementLoop, storeVariant, finalizeJob, type JobInputs } from '../orchestrator.js';
-import { runStandardPipeline } from './standard.js';
 
 const logger = createLogger('pipeline:outside-in');
 
@@ -40,13 +39,36 @@ export async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Pr
   const evidence = await runCommunityDeepResearch(insights, prompt);
   emitPipelineStep(jobId, 'community-research', 'complete');
 
-  if (evidence.evidenceLevel === 'product-only') {
-    logger.warn('Outside-in pipeline requires community evidence but none was found. Falling back to standard pipeline.', { jobId });
-    updateJobProgress(jobId, { currentStep: 'No community evidence found — falling back to standard pipeline...' });
-    return runStandardPipeline(jobId, inputs);
-  }
+  let practitionerContext = evidence.communityContextText;
 
-  const practitionerContext = evidence.communityContextText;
+  if (evidence.evidenceLevel === 'product-only') {
+    logger.warn('Grounded search returned no community evidence — synthesizing from model knowledge', { jobId });
+    updateJobProgress(jobId, { currentStep: 'Synthesizing practitioner pain from model knowledge...' });
+
+    const discoveryContext = formatInsightsForDiscovery(insights);
+    const synthesizePrompt = `You are a practitioner who works with tools in this space daily. Based on your deep knowledge of the community (Reddit r/devops, r/sre, r/kubernetes, Hacker News, Stack Overflow, GitHub Issues), describe the REAL pain points practitioners face.
+
+## Product Area
+${discoveryContext}
+
+${prompt ? `## Focus Area\n${prompt}\n` : ''}
+
+## Instructions
+Write as if you're summarizing dozens of real community threads you've read. Include:
+1. **Common Frustrations**: What practitioners actually complain about (use their language, not vendor language)
+2. **Failed Workarounds**: What people try that doesn't work
+3. **Wished-For Solutions**: What the community says they want
+4. **Real Scenarios**: Specific situations where current tools fail (on-call at 3am, pipeline breaks during deploy, etc.)
+
+Be raw, honest, and specific. Use practitioner language — "this sucks", "why can't we just...", "spent 3 hours debugging...". No marketing polish.`;
+
+    const synthesized = await generateContent(synthesizePrompt, { temperature: 0.8 }, selectedModel);
+    practitionerContext = `## Synthesized Practitioner Pain (from model knowledge)\n\n${synthesized.text}`;
+    evidence.evidenceLevel = 'partial';
+    evidence.communityContextText = practitionerContext;
+
+    emitPipelineStep(jobId, 'synthesize-pain', 'complete', { model: synthesized.model });
+  }
 
   updateJobProgress(jobId, { currentStep: 'Generating pain-grounded drafts...', progress: 15 });
 
