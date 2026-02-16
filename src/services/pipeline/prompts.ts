@@ -92,15 +92,31 @@ Target personas: ${insights.targetPersonas.join(', ')}
 
 Return ONLY a JSON array like: ["phrase1", "phrase2", ...]`;
 
-  try {
-    const response = await generateWithGemini(prompt, { model: getModelForTask('flash'), temperature: 0.2, maxTokens: 1000 });
-    const parsed = JSON.parse(response.text.replace(/```json?\n?/g, '').replace(/```/g, '').trim());
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      logger.info('Generated dynamic banned words', { voice: voice.name, count: parsed.length });
-      return parsed;
+  const MAX_RETRIES = 3;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await generateWithGemini(prompt, { model: getModelForTask('flash'), temperature: 0.2, maxTokens: 1000 });
+      const cleaned = response.text.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        logger.info('Generated dynamic banned words', { voice: voice.name, count: parsed.length, attempt });
+        return parsed;
+      }
+      logger.warn('Banned words response was not a valid array, retrying', { voice: voice.name, attempt, raw: cleaned.substring(0, 200) });
+    } catch (err) {
+      logger.warn('Failed to generate dynamic banned words', {
+        voice: voice.name,
+        attempt,
+        maxRetries: MAX_RETRIES,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
-    return DEFAULT_BANNED_WORDS;
-  } catch (err) {
+    if (attempt < MAX_RETRIES) {
+      await new Promise(r => setTimeout(r, 2000 * attempt));
+    }
+  }
+  logger.error('All banned words retries exhausted, using defaults', { voice: voice.name });
+  return DEFAULT_BANNED_WORDS; catch (err) {
     logger.warn('Failed to generate dynamic banned words, using defaults', {
       voice: voice.name,
       error: err instanceof Error ? err.message : String(err),
