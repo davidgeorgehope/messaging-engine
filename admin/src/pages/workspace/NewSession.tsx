@@ -174,6 +174,7 @@ export default function NewSession() {
       if (selectedVoiceIds.length > 0) data.voiceProfileIds = selectedVoiceIds;
       if (focusInstructions.trim()) data.focusInstructions = focusInstructions.trim();
       if (existingMessaging.trim()) data.existingMessaging = existingMessaging.trim();
+      data.modelProfile = modelProfile;
 
       if (contextMode === 'docs' && selectedDocIds.length > 0) {
         data.productDocIds = selectedDocIds;
