@@ -81,7 +81,7 @@ export async function createSession(userId: string, data: CreateSessionInput) {
     productContext: data.productContext || null,
     focusInstructions: data.focusInstructions || null,
     pipeline: data.pipeline || 'standard',
-    metadata: JSON.stringify({ ...(data.voiceProfileIds?.length ? { voiceProfileIds: data.voiceProfileIds } : {}), ...(data.existingMessaging ? { existingMessaging: data.existingMessaging } : {}) }),
+    metadata: JSON.stringify({ ...(data.voiceProfileIds?.length ? { voiceProfileIds: data.voiceProfileIds } : {}), ...(data.existingMessaging ? { existingMessaging: data.existingMessaging } : {}), ...(data.modelProfile ? { modelProfile: data.modelProfile } : {}) }),
     isArchived: false,
     createdAt: now,
     updatedAt: now,
@@ -183,7 +183,8 @@ export async function startSessionGeneration(sessionId: string) {
       prompt,
       voiceProfileIds,
       assetTypes,
-      model: 'gemini-3-pro-preview',
+      model: sessionMeta.modelProfile === 'test' ? 'gemini-2.5-flash' : 'gemini-3-pro-preview',
+      modelProfile: sessionMeta.modelProfile || 'production',
       pipeline,
     }),
     startedAt: now,
@@ -197,7 +198,10 @@ export async function startSessionGeneration(sessionId: string) {
     .where(eq(sessions.id, sessionId))
     .run();
 
-  // Fire-and-forget the generation pipeline
+  // Fire-and-forget the generation pipeline — set model profile for this job
+  const jobModelProfile = sessionMeta.modelProfile || 'production';
+  process.env.MODEL_PROFILE = jobModelProfile;
+  logger.info('Starting generation with model profile', { jobId, modelProfile: jobModelProfile });
   runPublicGenerationJob(jobId)
     .then(async () => {
       await db.update(sessions)
@@ -208,7 +212,8 @@ export async function startSessionGeneration(sessionId: string) {
       await createInitialVersions(sessionId, jobId).catch(err => {
         logger.warn('Failed to create initial versions', { sessionId, jobId, error: err instanceof Error ? err.message : String(err) });
       });
-      logger.info('Session generation completed', { sessionId, jobId });
+      process.env.MODEL_PROFILE = 'production';
+      logger.info('Session generation completed', { sessionId, jobId, modelProfile: jobModelProfile });
     })
     .catch(async (error) => {
       logger.error('Session generation failed', {

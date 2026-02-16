@@ -64,6 +64,7 @@ export default function NewSession() {
     'battlecard', 'talk_track', 'launch_messaging', 'social_hook',
   ]);
   const [pipeline, setPipeline] = useState('outside-in');
+  const [modelProfile, setModelProfile] = useState<'production' | 'test'>('production');
 
   const [contextMode, setContextMode] = useState<'upload' | 'paste' | 'docs'>('upload');
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
@@ -234,6 +235,43 @@ export default function NewSession() {
                 </button>
               );
             })}
+          </div>
+        </section>
+
+
+        {/* Model Profile Toggle */}
+        <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Model Profile</h2>
+              <p className="text-sm text-gray-500 mt-0.5">
+                {modelProfile === 'production' ? 'Pro models — higher quality, slower, more expensive' : 'Flash models — faster, cheaper, good for iteration'}
+              </p>
+            </div>
+            <div className="flex items-center bg-gray-100 rounded-lg p-1">
+              <button
+                type="button"
+                onClick={() => setModelProfile('test')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                  modelProfile === 'test'
+                    ? 'bg-emerald-500 text-white shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                ⚡ Cheap
+              </button>
+              <button
+                type="button"
+                onClick={() => setModelProfile('production')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                  modelProfile === 'production'
+                    ? 'bg-indigo-500 text-white shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                💎 Expensive
+              </button>
+            </div>
           </div>
         </section>
 
