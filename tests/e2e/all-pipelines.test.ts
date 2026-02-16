@@ -97,7 +97,7 @@ describe('All 5 Pipelines E2E (Flash model profile)', () => {
     const { PDFParse } = await import('pdf-parse');
     const buffer = readFileSync(ONE_WORKFLOW_PDF);
     const parser = new PDFParse({ data: buffer } as any);
-    const parsed = await parser.loadPDF();
+    const parsed = await parser.getText();
     TEST_PRODUCT_DOCS = parsed.text;
     console.log(`Loaded One Workflow PDF: ${TEST_PRODUCT_DOCS.length} chars`);
 
