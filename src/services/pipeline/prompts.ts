@@ -116,13 +116,7 @@ Return ONLY a JSON array like: ["phrase1", "phrase2", ...]`;
     }
   }
   logger.error('All banned words retries exhausted, using defaults', { voice: voice.name });
-  return DEFAULT_BANNED_WORDS; catch (err) {
-    logger.warn('Failed to generate dynamic banned words, using defaults', {
-      voice: voice.name,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return DEFAULT_BANNED_WORDS;
-  }
+  return DEFAULT_BANNED_WORDS;
 }
 
 // Cache: voiceId:domain -> banned words (per-process, cleared on restart)
