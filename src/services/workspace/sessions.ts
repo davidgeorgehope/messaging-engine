@@ -14,6 +14,7 @@ import { generateId, hashContent } from '../../utils/hash.js';
 import { createLogger } from '../../utils/logger.js';
 import { runPublicGenerationJob, ASSET_TYPE_LABELS } from '../../api/generate.js';
 import { PUBLIC_GENERATION_PRIORITY_ID } from '../../db/seed.js';
+import { getModelForTask } from '../../config.js';
 import { generateWithGemini } from '../ai/clients.js';
 import type { ExtractedInsights } from '../product/insights.js';
 import { createInitialVersions } from './versions.js';
@@ -184,7 +185,7 @@ export async function startSessionGeneration(sessionId: string) {
       prompt,
       voiceProfileIds,
       assetTypes,
-      model: sessionMeta.modelProfile === 'test' ? 'gemini-2.5-flash' : 'gemini-3-pro-preview',
+      model: getModelForTask(sessionMeta.modelProfile === 'test' ? 'flash' : 'pro'),
       modelProfile: sessionMeta.modelProfile || 'production',
       pipeline,
     }),
