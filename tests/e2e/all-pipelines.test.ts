@@ -46,6 +46,7 @@ works at 3am when nobody's watching.
 `;
 
 let testVoiceId: string;
+const testJobIds: string[] = [];
 
 async function createTestJob(pipeline: string, opts: { existingMessaging?: string } = {}): Promise<string> {
   const db = getDatabase();
@@ -70,6 +71,7 @@ async function createTestJob(pipeline: string, opts: { existingMessaging?: strin
     updatedAt: now,
   });
 
+  testJobIds.push(jobId);
   return jobId;
 }
 
@@ -113,7 +115,35 @@ describe('All 5 Pipelines E2E (Flash model profile)', () => {
     console.log(`Using voice: ${voices[0].name} (${testVoiceId})`);
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    // Clean up all test-generated data
+    if (testJobIds.length > 0) {
+      const db = getDatabase();
+      for (const jobId of testJobIds) {
+        // Get asset IDs for this job
+        const assets = await db.query.messagingAssets.findMany({
+          where: eq(messagingAssets.jobId, jobId),
+        });
+        const assetIds = assets.map(a => a.id);
+
+        // Delete traceability records
+        for (const assetId of assetIds) {
+          await db.delete(assetTraceability).where(eq(assetTraceability.assetId, assetId));
+        }
+
+        // Delete variants
+        for (const assetId of assetIds) {
+          await db.delete(assetVariants).where(eq(assetVariants.assetId, assetId));
+        }
+
+        // Delete assets
+        await db.delete(messagingAssets).where(eq(messagingAssets.jobId, jobId));
+
+        // Delete job
+        await db.delete(generationJobs).where(eq(generationJobs.id, jobId));
+      }
+      console.log(`\n🧹 Cleaned up ${testJobIds.length} test jobs and associated data`);
+    }
     closeDatabase();
   });
 
