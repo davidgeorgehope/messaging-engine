@@ -17,6 +17,8 @@ import { runPublicGenerationJob } from '../../src/api/generate.js';
 
 // Utils
 import { generateId } from '../../src/utils/hash.js';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 // Spirit validation — LLM-based scoring of pipeline intent fidelity
 import { scorePipelineSpirit, SPIRIT_THRESHOLDS } from './spirit-scoring.js';
@@ -24,18 +26,9 @@ import { scorePipelineSpirit, SPIRIT_THRESHOLDS } from './spirit-scoring.js';
 // Verify test profile is active
 import { getActiveModelProfile, getModelForTask } from '../../src/config.js';
 
-const TEST_PRODUCT_DOCS = `
-AcmeDeploy is a deployment automation platform for DevOps teams.
-It reduces deployment time from hours to minutes using intelligent rollback detection.
-Key features: zero-downtime deployments, automatic canary analysis, integration with
-Kubernetes and AWS ECS, real-time deployment health scoring.
-Practitioners currently struggle with manual deployment scripts, lack of rollback
-confidence, and no visibility into deployment health across microservices.
-AcmeDeploy monitors 47 health signals during each deployment, automatically triggers
-rollback if error rates exceed baseline by 2x, and provides a unified dashboard
-showing deployment status across all services. Teams using AcmeDeploy report 73%
-fewer failed deployments and 89% faster mean-time-to-recovery.
-`;
+// Use the real One Workflow PDF for realistic testing
+const ONE_WORKFLOW_PDF = join(process.cwd(), 'data', 'uploads', 'mllhgsii-d39o46w3_One_Workflow__1_.pdf');
+let TEST_PRODUCT_DOCS = '';
 
 const TEST_EXISTING_MESSAGING = `
 # AcmeDeploy: Stop Deploying Blind
@@ -98,6 +91,14 @@ async function getJobResult(jobId: string) {
 
 describe('All 5 Pipelines E2E (Flash model profile)', () => {
   beforeAll(async () => {
+    // Extract text from One Workflow PDF
+    const { PDFParse } = await import('pdf-parse');
+    const buffer = readFileSync(ONE_WORKFLOW_PDF);
+    const parser = new PDFParse({ data: buffer } as any);
+    const parsed = await parser.loadPDF();
+    TEST_PRODUCT_DOCS = parsed.text;
+    console.log(`Loaded One Workflow PDF: ${TEST_PRODUCT_DOCS.length} chars`);
+
     expect(getActiveModelProfile()).toBe('test');
     console.log(`\n🛡️  MODEL_PROFILE=${getActiveModelProfile()} — all calls using: ${getModelForTask('flash')}\n`);
     await initializeDatabase();
