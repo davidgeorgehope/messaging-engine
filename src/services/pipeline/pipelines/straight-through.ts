@@ -25,18 +25,18 @@ export async function runStraightThroughPipeline(jobId: string, inputs: JobInput
   let completedItems = 0;
 
   emitPipelineStep(jobId, 'extract-insights', 'running', { model: getModelForTask('flash') });
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 5 });
+  updateJobProgress(jobId, { status: 'running', currentStep: `Extracting product insights... [${getModelForTask('flash')}]`, progress: 5 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(() => {});
   const scoringContext = formatInsightsForScoring(insights);
   emitPipelineStep(jobId, 'extract-insights', 'complete');
 
-  updateJobProgress(jobId, { currentStep: 'Scoring existing content...', progress: 15 });
+  updateJobProgress(jobId, { currentStep: `Scoring existing content... [${getModelForTask('scoring')}]`, progress: 15 });
 
   for (const assetType of selectedAssetTypes) {
     for (const voice of selectedVoices) {
       emitPipelineStep(jobId, `score-${assetType}-${voice.slug}`, 'running');
-      updateJobProgress(jobId, { currentStep: `Scoring ${ASSET_TYPE_LABELS[assetType]} — ${voice.name}` });
+      updateJobProgress(jobId, { currentStep: `Scoring ${ASSET_TYPE_LABELS[assetType]} — ${voice.name} [${getModelForTask("scoring")}]` });
 
       const thresholds = parseScoringThresholds(voice.scoringThresholds);
 

@@ -19,7 +19,7 @@ export async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Pr
 
   // Step 1: Extract insights
   emitPipelineStep(jobId, 'extract-insights', 'running', { model: getModelForTask('flash') });
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
+  updateJobProgress(jobId, { status: 'running', currentStep: `Extracting product insights... [${getModelForTask('flash')}]`, progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
     logger.warn('Session naming failed', { jobId, error: err instanceof Error ? err.message : String(err) });
@@ -35,7 +35,7 @@ export async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Pr
 
   // Step 2: Community Deep Research (with retries)
   emitPipelineStep(jobId, 'community-research', 'running', { model: getModelForTask('flash') });
-  updateJobProgress(jobId, { currentStep: 'Running community Deep Research...', progress: 5 });
+  updateJobProgress(jobId, { currentStep: `Running community research... [${getModelForTask('flash')}]`, progress: 5 });
 
   const MAX_EVIDENCE_RETRIES = 3;
   let evidence = await runCommunityDeepResearch(insights, prompt);
@@ -57,7 +57,7 @@ export async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Pr
     throw new Error('Outside-in pipeline requires real community evidence. Grounded search returned no results after all retries. Try again or use a different pipeline.');
   }
 
-  updateJobProgress(jobId, { currentStep: 'Generating pain-grounded drafts...', progress: 15 });
+  updateJobProgress(jobId, { currentStep: `Generating pain-grounded drafts... [${getModelForTask('pro')}]`, progress: 15 });
 
   for (const assetType of selectedAssetTypes) {
     const template = await loadTemplate(assetType);
@@ -69,7 +69,7 @@ export async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Pr
       try {
         // Step 3: Generate pain-grounded first draft
         emitPipelineStep(jobId, `pain-draft-${assetType}-${voice.slug}`, 'running');
-        updateJobProgress(jobId, { currentStep: `Generating pain-grounded draft — ${voice.name}` });
+        updateJobProgress(jobId, { currentStep: `Generating pain-grounded draft — ${voice.name} [${getModelForTask('pro')}]` });
 
         const painFirstPrompt = buildPainFirstPrompt(practitionerContext, template, assetType, insights);
         const firstDraftResponse = await generateContent(painFirstPrompt, { systemPrompt, temperature: ASSET_TYPE_TEMPERATURE[assetType] ?? 0.7 }, selectedModel);
@@ -77,14 +77,14 @@ export async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Pr
 
         // Step 4: Competitive research
         emitPipelineStep(jobId, `competitive-research-${assetType}-${voice.slug}`, 'running');
-        updateJobProgress(jobId, { currentStep: `Running competitive research — ${voice.name}` });
+        updateJobProgress(jobId, { currentStep: `Running competitive research — ${voice.name} [${getModelForTask('flash')}]` });
 
         const competitiveContext = await runCompetitiveResearch(insights, prompt).catch(() => '');
         emitPipelineStep(jobId, `competitive-research-${assetType}-${voice.slug}`, 'complete');
 
         // Step 5: Enrich draft with competitive intel
         emitPipelineStep(jobId, `enrich-competitive-${assetType}-${voice.slug}`, 'running');
-        updateJobProgress(jobId, { currentStep: `Enriching with competitive intel — ${voice.name}` });
+        updateJobProgress(jobId, { currentStep: `Enriching with competitive intel — ${voice.name} [${getModelForTask('pro')}]` });
 
         const enrichCompetitivePrompt = `Here's the practitioner-grounded draft. Here's competitive research. Update the draft to weave in competitive positioning WITHOUT losing the practitioner voice.
 
@@ -106,7 +106,7 @@ ${competitiveContext.substring(0, 5000)}
 
         // Step 6: Refinement loop (product layering removed — outside-in keeps practitioner voice pure)
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'running');
-        updateJobProgress(jobId, { currentStep: `Refining — ${voice.name}` });
+        updateJobProgress(jobId, { currentStep: `Refining — ${voice.name} [${getModelForTask('pro')}]` });
 
         const result = await refinementLoop(enrichedResponse.text, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores, scorerHealth: result.scores.scorerHealth });

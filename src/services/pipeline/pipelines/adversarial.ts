@@ -20,7 +20,7 @@ export async function runAdversarialPipeline(jobId: string, inputs: JobInputs): 
 
   // Step 1: Extract insights
   emitPipelineStep(jobId, 'extract-insights', 'running', { model: getModelForTask('flash') });
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting product insights...', progress: 2 });
+  updateJobProgress(jobId, { status: 'running', currentStep: `Extracting product insights... [${getModelForTask('flash')}]`, progress: 2 });
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   await nameSessionFromInsights(jobId, insights, selectedAssetTypes).catch(err => {
     logger.warn('Session naming failed', { jobId, error: err instanceof Error ? err.message : String(err) });
@@ -42,7 +42,7 @@ export async function runAdversarialPipeline(jobId: string, inputs: JobInputs): 
 
   // Step 3: Competitive research
   emitPipelineStep(jobId, 'competitive-research', 'running', { model: getModelForTask('flash') });
-  updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 10 });
+  updateJobProgress(jobId, { currentStep: `Running competitive research... [${getModelForTask('flash')}]`, progress: 10 });
   let competitivePromptExtra = prompt || '';
   if (evidence.communityContextText) {
     competitivePromptExtra += '\n\nCommunity findings to inform competitive analysis:\n' + evidence.communityContextText.substring(0, 2000);
@@ -141,7 +141,7 @@ Output ONLY the rewritten content. No meta-commentary.`;
 
         // Refinement loop
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'running');
-        updateJobProgress(jobId, { currentStep: `Refining — ${voice.name}` });
+        updateJobProgress(jobId, { currentStep: `Refining — ${voice.name} [${getModelForTask('pro')}]` });
         const result = await refinementLoop(currentContent, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores, scorerHealth: result.scores.scorerHealth });
 

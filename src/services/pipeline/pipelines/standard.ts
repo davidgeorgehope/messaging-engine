@@ -20,7 +20,7 @@ export async function runStandardPipeline(jobId: string, inputs: JobInputs): Pro
 
   // Step 0: Deep PoV Extraction
   emitPipelineStep(jobId, 'deep-pov-extraction', 'running', { model: getModelForTask('pro') });
-  updateJobProgress(jobId, { status: 'running', currentStep: 'Extracting deep product PoV (thesis, narrative, claims)...', progress: 2 });
+  updateJobProgress(jobId, { status: 'running', currentStep: `Extracting deep product PoV... [${getModelForTask('pro')}]`, progress: 2 });
   const povInsights = await extractDeepPoV(productDocs);
   const insights: ExtractedInsights = povInsights ?? await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   const deepPoV = povInsights;
@@ -38,13 +38,13 @@ export async function runStandardPipeline(jobId: string, inputs: JobInputs): Pro
 
   // Step 1: Community research
   emitPipelineStep(jobId, 'community-validation', 'running', { model: getModelForTask('flash') });
-  updateJobProgress(jobId, { currentStep: 'Validating PoV against community reality...', progress: 5 });
+  updateJobProgress(jobId, { currentStep: `Validating PoV against community reality... [${getModelForTask('flash')}]`, progress: 5 });
   const evidence = await runCommunityDeepResearch(insights, prompt);
   emitPipelineStep(jobId, 'community-validation', 'complete');
 
   // Step 2: Competitive research
   emitPipelineStep(jobId, 'competitive-research', 'running', { model: getModelForTask('flash') });
-  updateJobProgress(jobId, { currentStep: 'Running competitive research...', progress: 10 });
+  updateJobProgress(jobId, { currentStep: `Running competitive research... [${getModelForTask('flash')}]`, progress: 10 });
   let competitivePromptExtra = prompt || '';
   if (evidence.communityContextText) {
     competitivePromptExtra += '\n\nCommunity findings to inform competitive analysis:\n' + evidence.communityContextText.substring(0, 2000);
@@ -59,12 +59,12 @@ export async function runStandardPipeline(jobId: string, inputs: JobInputs): Pro
 
   // Step 3: Generate
   emitPipelineStep(jobId, 'generate', 'running', { model: getModelForTask('pro') });
-  updateJobProgress(jobId, { currentStep: 'Generating from product narrative...', progress: 18 });
+  updateJobProgress(jobId, { currentStep: `Generating from product narrative... [${getModelForTask('pro')}]`, progress: 18 });
 
   for (const assetType of selectedAssetTypes) {
     const template = await loadTemplate(assetType);
     for (const voice of selectedVoices) {
-      updateJobProgress(jobId, { currentStep: `Generating ${ASSET_TYPE_LABELS[assetType]} — ${voice.name}` });
+      updateJobProgress(jobId, { currentStep: `Generating ${ASSET_TYPE_LABELS[assetType]} — ${voice.name} [${getModelForTask('pro')}]` });
 
       const thresholds = parseScoringThresholds(voice.scoringThresholds);
 
