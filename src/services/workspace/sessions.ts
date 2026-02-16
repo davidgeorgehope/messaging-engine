@@ -32,6 +32,7 @@ export interface CreateSessionInput {
   focusInstructions?: string;
   pipeline?: string;
   existingMessaging?: string;
+  modelProfile?: 'production' | 'test';
 }
 
 export async function createSession(userId: string, data: CreateSessionInput) {

@@ -3,8 +3,11 @@ set -e
 
 cd /root/messaging-engine
 
+echo "🔨 Building backend..."
+npm run build 2>&1 | tail -3
+
 echo "🔨 Building admin UI..."
-cd admin && npm run build && cd ..
+cd admin && npm run build 2>&1 | tail -3 && cd ..
 
 echo "🧪 Running unit tests..."
 npm run test:unit 2>&1 | tail -5
