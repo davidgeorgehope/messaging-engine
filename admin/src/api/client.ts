@@ -136,4 +136,12 @@ export const api = {
   acceptChatContent: (sessionId: string, messageId: string) =>
     request<{ version: any }>(`/workspace/sessions/${sessionId}/chat/${messageId}/accept`, { method: 'POST' }),
   // streamChat is handled directly via fetch + ReadableStream, not through the api client
+
+  // LLM Call Log
+  getLLMCalls: (sessionId: string, params?: { purpose?: string; page?: string; limit?: string }) => {
+    const query = new URLSearchParams(params || {});
+    return request<{ data: any[]; meta: { page: number; limit: number } }>(`/workspace/sessions/${sessionId}/llm-calls?${query}`);
+  },
+  getLLMCall: (sessionId: string, callId: string) =>
+    request<{ data: any }>(`/workspace/sessions/${sessionId}/llm-calls/${callId}`),
 };

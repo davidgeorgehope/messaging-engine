@@ -332,6 +332,30 @@ export const actionJobs = sqliteTable('action_jobs', {
 });
 
 // ============================================================================
+// Table 20: llm_calls (LLM call logging)
+// ============================================================================
+export const llmCalls = sqliteTable('llm_calls', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id').references(() => sessions.id, { onDelete: 'cascade' }),
+  jobId: text('job_id').references(() => generationJobs.id, { onDelete: 'set null' }),
+  timestamp: text('timestamp').notNull(),
+  model: text('model').notNull(),
+  purpose: text('purpose').notNull(),
+  systemPrompt: text('system_prompt'),
+  userPrompt: text('user_prompt').notNull(),
+  response: text('response'),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  totalTokens: integer('total_tokens').notNull().default(0),
+  cachedTokens: integer('cached_tokens').notNull().default(0),
+  latencyMs: integer('latency_ms').notNull().default(0),
+  success: integer('success', { mode: 'boolean' }).notNull().default(true),
+  errorMessage: text('error_message'),
+  finishReason: text('finish_reason'),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+});
+
+// ============================================================================
 // Type exports
 // ============================================================================
 export type MessagingPriority = typeof messagingPriorities.$inferSelect;
@@ -390,3 +414,6 @@ export type InsertSessionMessage = typeof sessionMessages.$inferInsert;
 
 export type ActionJob = typeof actionJobs.$inferSelect;
 export type InsertActionJob = typeof actionJobs.$inferInsert;
+
+export type LLMCall = typeof llmCalls.$inferSelect;
+export type InsertLLMCall = typeof llmCalls.$inferInsert;

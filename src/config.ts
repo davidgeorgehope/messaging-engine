@@ -67,7 +67,7 @@ export const config = {
     gemini: {
       flashModel: 'gemini-3-flash-preview',
       proModel: 'gemini-3-pro-preview',
-      deepResearchAgent: 'deep-research-pro-preview-12-2025',
+      deepResearchAgent: 'deep-research-pro-preview',
     },
   },
 
@@ -157,7 +157,7 @@ const MODEL_PROFILES: Record<ModelProfile, Record<ModelTask, string>> = {
   production: {
     flash: 'gemini-3-flash-preview',
     pro: 'gemini-3-pro-preview',
-    deepResearch: 'deep-research-pro-preview-12-2025',
+    deepResearch: 'deep-research-pro-preview',
     generation: 'gemini-3-pro-preview',
     scoring: 'gemini-3-flash-preview',
     deslop: 'gemini-3-pro-preview',

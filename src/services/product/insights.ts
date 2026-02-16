@@ -7,6 +7,7 @@ import { createLogger } from '../../utils/logger.js';
 const logger = createLogger('product:insights');
 
 export interface ExtractedInsights {
+  productName: string;
   productCapabilities: string[];
   keyDifferentiators: string[];
   targetPersonas: string[];
@@ -32,6 +33,7 @@ export async function extractInsights(productDocs: string): Promise<ExtractedIns
 ${truncated}
 
 Return a JSON object with these fields:
+- "productName": the official product name exactly as it should appear in generated content (e.g. "Datadog", "Grafana Cloud", "PagerDuty"). Extract the exact name from the docs — never invent or abbreviate it.
 - "productCapabilities": array of specific product capabilities/features (max 12)
 - "keyDifferentiators": array of what makes this product different from alternatives (max 8)
 - "targetPersonas": array of who this product is for, with their roles and concerns (max 6)
@@ -60,6 +62,7 @@ IMPORTANT: Return ONLY valid JSON, no markdown code fences or explanation.`;
 
     // Default new fields if model omits them
     return {
+      productName: parsed.productName ?? '',
       productCapabilities: parsed.productCapabilities ?? [],
       keyDifferentiators: parsed.keyDifferentiators ?? [],
       targetPersonas: parsed.targetPersonas ?? [],
@@ -89,6 +92,7 @@ export function buildFallbackInsights(productDocs: string): ExtractedInsights {
   const firstSentences = excerpt.split(/[.!?]\s+/).slice(0, 3).join('. ') + '.';
 
   return {
+    productName: '',
     productCapabilities: [],
     keyDifferentiators: [],
     targetPersonas: [],
@@ -114,6 +118,10 @@ export function buildFallbackInsights(productDocs: string): ExtractedInsights {
 export function formatInsightsForDiscovery(insights: ExtractedInsights): string {
   const sections: string[] = [];
 
+  if (insights.productName) {
+    sections.push(`Product: ${insights.productName}`);
+  }
+
   const domain = [insights.domain, insights.category, insights.productType]
     .filter(p => p && p !== 'unknown');
   if (domain.length > 0) sections.push(domain.join(' / '));
@@ -134,6 +142,9 @@ export function formatInsightsForDiscovery(insights: ExtractedInsights): string 
 export function formatInsightsForResearch(insights: ExtractedInsights): string {
   const sections: string[] = [];
 
+  if (insights.productName) {
+    sections.push(`Product Name: ${insights.productName}`);
+  }
   if (insights.summary) {
     sections.push(`Product: ${insights.summary}`);
   }
@@ -156,6 +167,10 @@ export function formatInsightsForResearch(insights: ExtractedInsights): string {
  */
 export function formatInsightsForPrompt(insights: ExtractedInsights): string {
   const sections: string[] = [];
+
+  if (insights.productName) {
+    sections.push(`### Product Name\n**${insights.productName}** — use this exact name. Never invent or alter the product name.`);
+  }
 
   sections.push(`### Product Summary\n${insights.summary}`);
 
@@ -187,6 +202,10 @@ export function formatInsightsForPrompt(insights: ExtractedInsights): string {
  */
 export function formatInsightsForScoring(insights: ExtractedInsights): string {
   const sections: string[] = [];
+
+  if (insights.productName) {
+    sections.push(`Product Name: ${insights.productName}`);
+  }
 
   if (insights.productCapabilities.length > 0) {
     sections.push(`Capabilities:\n${insights.productCapabilities.map(c => `- ${c}`).join('\n')}`);
@@ -237,6 +256,7 @@ export async function extractDeepPoV(productDocs: string): Promise<DeepPoVInsigh
 ${truncated}
 
 Return a JSON object with these fields:
+- "productName": the official product name exactly as it should appear in generated content (e.g. "Datadog", "Grafana Cloud", "PagerDuty"). Extract the exact name from the docs — never invent or abbreviate it.
 - "productCapabilities": array of specific product capabilities/features (max 12)
 - "keyDifferentiators": array of what makes this product different from alternatives (max 8)
 - "targetPersonas": array of who this product is for, with their roles and concerns (max 6)
@@ -275,6 +295,7 @@ IMPORTANT: Return ONLY valid JSON, no markdown code fences.`;
     const parsed = JSON.parse(jsonText) as Partial<DeepPoVInsights>;
 
     return {
+      productName: parsed.productName ?? '',
       productCapabilities: parsed.productCapabilities ?? [],
       keyDifferentiators: parsed.keyDifferentiators ?? [],
       targetPersonas: parsed.targetPersonas ?? [],
@@ -309,6 +330,10 @@ IMPORTANT: Return ONLY valid JSON, no markdown code fences.`;
  */
 export function formatDeepPoVForPrompt(insights: DeepPoVInsights): string {
   const sections: string[] = [];
+
+  if (insights.productName) {
+    sections.push(`### Product Name\n**${insights.productName}** — use this exact name. Never invent or alter the product name.`);
+  }
 
   sections.push(`### Point of View\n${insights.pointOfView}`);
   sections.push(`### Thesis\n${insights.thesis}`);

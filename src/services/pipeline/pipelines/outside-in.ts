@@ -34,7 +34,7 @@ export async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Pr
   }));
 
   // Step 2: Community Deep Research (with retries)
-  emitPipelineStep(jobId, 'community-research', 'running', { model: getModelForTask('flash') });
+  emitPipelineStep(jobId, 'community-research', 'running', { model: getModelForTask('deepResearch') });
   updateJobProgress(jobId, { currentStep: `Running community research... [${getModelForTask('deepResearch')}]`, progress: 5 });
 
   const MAX_EVIDENCE_RETRIES = 3;
@@ -64,20 +64,20 @@ export async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Pr
     for (const voice of selectedVoices) {
       const thresholds = parseScoringThresholds(voice.scoringThresholds);
       const bannedWords = voiceBannedWords.get(voice.id);
-      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel, undefined, bannedWords);
+      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel, undefined, bannedWords, insights.productName);
 
       try {
         // Step 3: Generate pain-grounded first draft
         emitPipelineStep(jobId, `pain-draft-${assetType}-${voice.slug}`, 'running');
         updateJobProgress(jobId, { currentStep: `Generating pain-grounded draft — ${voice.name} [${getModelForTask('pro')}]` });
 
-        const painFirstPrompt = buildPainFirstPrompt(practitionerContext, template, assetType, insights);
+        const painFirstPrompt = buildPainFirstPrompt(practitionerContext, template, assetType, insights, insights.productName);
         const firstDraftResponse = await generateContent(painFirstPrompt, { systemPrompt, temperature: ASSET_TYPE_TEMPERATURE[assetType] ?? 0.7 }, selectedModel);
         emitPipelineStep(jobId, `pain-draft-${assetType}-${voice.slug}`, 'complete', { draft: firstDraftResponse.text, model: firstDraftResponse.model });
 
         // Step 4: Competitive research
         emitPipelineStep(jobId, `competitive-research-${assetType}-${voice.slug}`, 'running');
-        updateJobProgress(jobId, { currentStep: `Running competitive research — ${voice.name} [${getModelForTask('flash')}]` });
+        updateJobProgress(jobId, { currentStep: `Running competitive research — ${voice.name} [${getModelForTask('deepResearch')}]` });
 
         const competitiveContext = await runCompetitiveResearch(insights, prompt).catch(() => '');
         emitPipelineStep(jobId, `competitive-research-${assetType}-${voice.slug}`, 'complete');
@@ -108,7 +108,7 @@ ${competitiveContext.substring(0, 5000)}
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'running');
         updateJobProgress(jobId, { currentStep: `Refining — ${voice.name} [${getModelForTask('pro')}]` });
 
-        const result = await refinementLoop(enrichedResponse.text, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
+        const result = await refinementLoop(enrichedResponse.text, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel, 3, insights.productName);
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores, scorerHealth: result.scores.scorerHealth });
 
         // Step 8: Store

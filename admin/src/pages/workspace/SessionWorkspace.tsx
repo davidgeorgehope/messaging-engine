@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { api } from '../../api/client';
 import ChatPanel from './components/ChatPanel';
 import PipelineProgress from './components/PipelineProgress';
+import LLMCallLog from './components/LLMCallLog';
 
 function ScoreBadge({ label, value, threshold, inverted = false }: {
   label: string;
@@ -534,6 +535,12 @@ export default function SessionWorkspace() {
       )}
 
       {/* Completed state */}
+      {isCompleted && results.length > 0 && (
+        <div className="mb-4">
+          <LLMCallLog sessionId={id!} />
+        </div>
+      )}
+
       {isCompleted && results.length > 0 && (
         <div className={`${showChat ? 'flex gap-6' : ''}`}>
         <div className={showChat ? 'flex-1 min-w-0' : ''}>

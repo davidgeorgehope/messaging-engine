@@ -37,14 +37,14 @@ export async function runStandardPipeline(jobId: string, inputs: JobInputs): Pro
   }));
 
   // Step 1: Community research
-  emitPipelineStep(jobId, 'community-validation', 'running', { model: getModelForTask('flash') });
-  updateJobProgress(jobId, { currentStep: `Validating PoV against community reality... [${getModelForTask('flash')}]`, progress: 5 });
+  emitPipelineStep(jobId, 'community-validation', 'running', { model: getModelForTask('deepResearch') });
+  updateJobProgress(jobId, { currentStep: `Validating PoV against community reality... [${getModelForTask('deepResearch')}]`, progress: 5 });
   const evidence = await runCommunityDeepResearch(insights, prompt);
   emitPipelineStep(jobId, 'community-validation', 'complete');
 
   // Step 2: Competitive research
-  emitPipelineStep(jobId, 'competitive-research', 'running', { model: getModelForTask('flash') });
-  updateJobProgress(jobId, { currentStep: `Running competitive research... [${getModelForTask('flash')}]`, progress: 10 });
+  emitPipelineStep(jobId, 'competitive-research', 'running', { model: getModelForTask('deepResearch') });
+  updateJobProgress(jobId, { currentStep: `Running competitive research... [${getModelForTask('deepResearch')}]`, progress: 10 });
   let competitivePromptExtra = prompt || '';
   if (evidence.communityContextText) {
     competitivePromptExtra += '\n\nCommunity findings to inform competitive analysis:\n' + evidence.communityContextText.substring(0, 2000);
@@ -70,8 +70,8 @@ export async function runStandardPipeline(jobId: string, inputs: JobInputs): Pro
 
       const bannedWords = voiceBannedWords.get(voice.id);
       const systemPrompt = deepPoV
-        ? buildSystemPrompt(voice, assetType, evidence.evidenceLevel, 'standard', bannedWords)
-        : buildSystemPrompt(voice, assetType, evidence.evidenceLevel, undefined, bannedWords);
+        ? buildSystemPrompt(voice, assetType, evidence.evidenceLevel, 'standard', bannedWords, insights.productName)
+        : buildSystemPrompt(voice, assetType, evidence.evidenceLevel, undefined, bannedWords, insights.productName);
 
       let researchContext = competitiveResult;
       if (evidence.communityContextText) {
@@ -81,12 +81,12 @@ export async function runStandardPipeline(jobId: string, inputs: JobInputs): Pro
       }
 
       const userPrompt = deepPoV
-        ? buildPoVFirstPrompt(deepPoV, evidence.communityContextText, competitiveResult, template, assetType, existingMessaging, prompt)
-        : buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel);
+        ? buildPoVFirstPrompt(deepPoV, evidence.communityContextText, competitiveResult, template, assetType, existingMessaging, prompt, insights.productName)
+        : buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel, insights.productName);
 
       try {
         const initial = await generateAndScore(userPrompt, systemPrompt, selectedModel, scoringContext, thresholds, assetType);
-        const result = await refinementLoop(initial.content, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
+        const result = await refinementLoop(initial.content, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel, 3, insights.productName);
         await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence, { systemPrompt, userPrompt });
       } catch (error) {
         logger.error('Failed to generate variant', {

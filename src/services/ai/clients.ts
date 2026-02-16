@@ -3,6 +3,7 @@ import { GoogleGenAI } from '@google/genai';
 import { config, getModelForTask, isTestProfile } from '../../config.js';
 import { createLogger } from '../../utils/logger.js';
 import { withRetry, withTimeout, createRateLimiter } from '../../utils/retry.js';
+import { logCall } from './call-logger.js';
 import type {
   TokenUsage,
   AIResponse,
@@ -182,6 +183,20 @@ export async function generateWithClaude(
       latencyMs,
     });
 
+    logCall({
+      model,
+      systemPrompt: options.systemPrompt,
+      userPrompt: prompt,
+      response: text,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      totalTokens: usage.totalTokens,
+      cachedTokens: usage.cachedTokens,
+      latencyMs,
+      success: true,
+      finishReason: response.stop_reason ?? undefined,
+    });
+
     return {
       text,
       usage,
@@ -194,6 +209,13 @@ export async function generateWithClaude(
     logger.error('Claude generation failed', {
       model,
       error: error instanceof Error ? error.message : String(error),
+    });
+    logCall({
+      model,
+      systemPrompt: options.systemPrompt,
+      userPrompt: prompt,
+      success: false,
+      errorMessage: error instanceof Error ? error.message : String(error),
     });
     throw error;
   }
@@ -267,6 +289,20 @@ export async function generateWithGemini(
       latencyMs,
     });
 
+    logCall({
+      model,
+      systemPrompt: options.systemPrompt,
+      userPrompt: prompt,
+      response: text,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      totalTokens: usage.totalTokens,
+      cachedTokens: usage.cachedTokens,
+      latencyMs,
+      success: true,
+      finishReason: response.candidates?.[0]?.finishReason ?? undefined,
+    });
+
     return {
       text,
       usage,
@@ -279,6 +315,13 @@ export async function generateWithGemini(
     logger.error('Gemini generation failed', {
       model,
       error: error instanceof Error ? error.message : String(error),
+    });
+    logCall({
+      model,
+      systemPrompt: options.systemPrompt,
+      userPrompt: prompt,
+      success: false,
+      errorMessage: error instanceof Error ? error.message : String(error),
     });
     throw error;
   }
@@ -386,6 +429,18 @@ export async function generateWithGeminiGroundedSearch(
       latencyMs,
     });
 
+    logCall({
+      model,
+      systemPrompt: options.systemPrompt,
+      userPrompt: prompt,
+      response: text,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      totalTokens: usage.totalTokens,
+      latencyMs,
+      success: true,
+    });
+
     return {
       text,
       sources,
@@ -399,6 +454,13 @@ export async function generateWithGeminiGroundedSearch(
     logger.error('Gemini grounded search failed', {
       model,
       error: error instanceof Error ? error.message : String(error),
+    });
+    logCall({
+      model,
+      systemPrompt: options.systemPrompt,
+      userPrompt: prompt,
+      success: false,
+      errorMessage: error instanceof Error ? error.message : String(error),
     });
     throw error;
   }

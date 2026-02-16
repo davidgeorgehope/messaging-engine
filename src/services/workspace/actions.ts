@@ -32,6 +32,7 @@ import {
   generateAndScore,
   refinementLoop,
 } from '../pipeline/orchestrator.js';
+import { withLLMContext } from '../ai/call-context.js';
 
 const logger = createLogger('workspace:actions');
 
@@ -229,16 +230,18 @@ export async function runDeslopAction(sessionId: string, assetType: string): Pro
   const previousScores = extractPreviousScores(active);
   logger.info('Running deslop action', { sessionId, assetType });
 
-  const slopAnalysis = await analyzeSlop(active.content);
-  const deslopped = await deslop(active.content, slopAnalysis);
-  const scores = await scoreContent(deslopped);
-  const thresholds = await loadSessionThresholds(sessionId);
+  return withLLMContext({ purpose: 'deslop', sessionId }, async () => {
+    const slopAnalysis = await analyzeSlop(active.content);
+    const deslopped = await deslop(active.content, slopAnalysis);
+    const scores = await scoreContent(deslopped);
+    const thresholds = await loadSessionThresholds(sessionId);
 
-  const version = await createVersionAndActivate(sessionId, assetType, deslopped, 'deslop', {
-    previousVersion: active.versionNumber,
-    slopAnalysis,
-  }, scores, thresholds);
-  return { version, previousScores };
+    const version = await createVersionAndActivate(sessionId, assetType, deslopped, 'deslop', {
+      previousVersion: active.versionNumber,
+      slopAnalysis,
+    }, scores, thresholds);
+    return { version, previousScores };
+  });
 }
 
 /**
@@ -254,6 +257,8 @@ export async function runRegenerateAction(sessionId: string, assetType: string):
   if (!session) throw new Error('Session not found');
 
   logger.info('Running regenerate action', { sessionId, assetType });
+
+  return withLLMContext({ purpose: 'regenerate', sessionId }, async () => {
 
   const voice = await loadSessionVoice(session);
   const thresholds = parseScoringThresholds(voice.scoringThresholds);
@@ -285,7 +290,7 @@ export async function runRegenerateAction(sessionId: string, assetType: string):
   const template = await loadTemplate(assetType as AssetType);
 
   // Build prompts — same functions used by all pipelines
-  const systemPrompt = buildSystemPrompt(voice, assetType as AssetType, evidenceLevel, undefined, bannedWords);
+  const systemPrompt = buildSystemPrompt(voice, assetType as AssetType, evidenceLevel, undefined, bannedWords, insights.productName);
   const userPrompt = buildUserPrompt(
     existingMessaging,
     session.focusInstructions ?? undefined,
@@ -294,6 +299,7 @@ export async function runRegenerateAction(sessionId: string, assetType: string):
     assetType as AssetType,
     insights,
     evidenceLevel,
+    insights.productName,
   );
 
   const selectedModel = JSON.parse(session.metadata || '{}').model;
@@ -328,6 +334,7 @@ export async function runRegenerateAction(sessionId: string, assetType: string):
       systemPrompt,
       selectedModel,
       1, // single refinement iteration for workspace regeneration
+      insights.productName,
     );
     finalContent = refined.content;
     scores = refined.scores;
@@ -342,6 +349,7 @@ export async function runRegenerateAction(sessionId: string, assetType: string):
     refined: !passesGates ? false : undefined,
   }, scores, thresholds);
   return { version, previousScores };
+  });
 }
 
 /**
@@ -358,6 +366,7 @@ export async function runVoiceChangeAction(sessionId: string, assetType: string,
 
   logger.info('Running voice change action', { sessionId, assetType, newVoiceProfileId });
 
+  return withLLMContext({ purpose: 'voice-change', sessionId }, async () => {
   const prompt = `Rewrite the following ${assetType.replace(/_/g, ' ')} content using this voice profile:\n\n## Voice: ${voice.name}\n${voice.voiceGuide}\n\n## Content to Rewrite\n${active.content}\n\nRewrite in the new voice. Output ONLY the rewritten content.`;
 
   const response = await generateWithGemini(prompt, {
@@ -374,6 +383,7 @@ export async function runVoiceChangeAction(sessionId: string, assetType: string,
     newVoiceName: voice.name,
   }, scores, thresholds);
   return { version, previousScores };
+  });
 }
 
 /**
@@ -398,6 +408,7 @@ export async function runAdversarialLoopAction(sessionId: string, assetType: str
 
   logger.info('Running adversarial loop', { sessionId, assetType, alreadyPassing: checkQualityGates(scores, thresholds) });
 
+  return withLLMContext({ purpose: 'adversarial-loop', sessionId }, async () => {
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     // Deslop if slop is high
     if (scores.slopScore > (thresholds.slopMax ?? 5)) {
@@ -465,6 +476,7 @@ export async function runAdversarialLoopAction(sessionId: string, assetType: str
     finalScores: scores,
   }, scores, thresholds);
   return { version, previousScores };
+  });
 }
 
 export async function runCompetitiveDeepDiveAction(sessionId: string, assetType: string): Promise<ActionResult> {
@@ -478,6 +490,7 @@ export async function runCompetitiveDeepDiveAction(sessionId: string, assetType:
 
   logger.info('Running competitive deep dive action', { sessionId, assetType });
 
+  return withLLMContext({ purpose: 'competitive-deep-dive', sessionId }, async () => {
   const productDocs = await loadSessionProductDocs(session);
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   const researchInsights = formatInsightsForResearch(insights);
@@ -516,6 +529,7 @@ export async function runCompetitiveDeepDiveAction(sessionId: string, assetType:
     enrichedAt: new Date().toISOString(),
   }, scores, thresholds);
   return { version, previousScores };
+  });
 }
 
 export async function runCommunityCheckAction(sessionId: string, assetType: string): Promise<ActionResult> {
@@ -529,6 +543,7 @@ export async function runCommunityCheckAction(sessionId: string, assetType: stri
 
   logger.info('Running community check action', { sessionId, assetType });
 
+  return withLLMContext({ purpose: 'community-check', sessionId }, async () => {
   const productDocs = await loadSessionProductDocs(session);
   const insights = await extractInsights(productDocs) ?? buildFallbackInsights(productDocs);
   const discoveryContext = formatInsightsForDiscovery(insights);
@@ -595,6 +610,7 @@ Output ONLY the rewritten content.`;
     enrichedAt: new Date().toISOString(),
   }, scores, thresholds);
   return { version, previousScores };
+  });
 }
 
 /**
@@ -614,6 +630,7 @@ export async function runMultiPerspectiveAction(sessionId: string, assetType: st
 
   logger.info('Running multi-perspective action', { sessionId, assetType });
 
+  return withLLMContext({ purpose: 'multi-perspective', sessionId }, async () => {
   const voice = await loadSessionVoice(session);
   const thresholds = parseScoringThresholds(voice.scoringThresholds);
   const productDocs = await loadSessionProductDocs(session);
@@ -621,7 +638,7 @@ export async function runMultiPerspectiveAction(sessionId: string, assetType: st
   const scoringContext = formatInsightsForScoring(insights);
   const template = await loadTemplate(assetType as AssetType);
   const bannedWords = await getBannedWordsForVoice(voice, insights);
-  const systemPrompt = buildSystemPrompt(voice, assetType as AssetType, undefined, undefined, bannedWords);
+  const systemPrompt = buildSystemPrompt(voice, assetType as AssetType, undefined, undefined, bannedWords, insights.productName);
   const selectedModel = JSON.parse(session.metadata || '{}').model;
 
   const baseContent = active.content;
@@ -726,4 +743,5 @@ Output ONLY the synthesized content. No meta-commentary.`;
     allScores: candidates.map(c => ({ label: c.label, total: totalQualityScore(c.scores).toFixed(1) })),
   }, best.scores, thresholds);
   return { version, previousScores };
+  });
 }

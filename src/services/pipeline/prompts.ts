@@ -130,7 +130,7 @@ export async function getBannedWordsForVoice(voice: VoiceProfile, insights: Extr
   return words;
 }
 
-export function buildSystemPrompt(voice: VoiceProfile, assetType: AssetType, evidenceLevel?: EvidenceBundle['evidenceLevel'], pipeline?: 'standard' | 'outside-in', bannedWords?: string[]): string {
+export function buildSystemPrompt(voice: VoiceProfile, assetType: AssetType, evidenceLevel?: EvidenceBundle['evidenceLevel'], pipeline?: 'standard' | 'outside-in', bannedWords?: string[], productName?: string): string {
   let typeInstructions = '';
 
   if (assetType === 'messaging_template') {
@@ -186,7 +186,7 @@ ${typeInstructions}
 5. Every claim must be traceable to the product docs or research
 6. Sound like someone who understands the practitioner's world, not someone selling to them
 7. Be specific — names, numbers, scenarios. Vague messaging is bad messaging.
-8. DO NOT use: ${(bannedWords ?? DEFAULT_BANNED_WORDS).map(w => `"${w}"`).join(", ")}
+8. DO NOT use: ${(bannedWords ?? DEFAULT_BANNED_WORDS).map(w => `"${w}"`).join(", ")}${productName ? `\n9. PRODUCT NAME: Always refer to the product as "${productName}". Never abbreviate, invent, or use a different product name.` : ''}
 
 ## Evidence Grounding Rules
 ${evidenceLevel === 'product-only' ? `CRITICAL: You have NO community evidence for this generation. Do NOT fabricate practitioner quotes or use phrases like "practitioners say...", "as one engineer noted...", "community sentiment suggests...", "teams report...", or "according to engineers on Reddit...". Write from product documentation only. Where practitioner validation would strengthen a point, write: "[Needs community validation]".` : `You have real community evidence in the prompt. ONLY reference practitioners and quotes from the "Verified Community Evidence" section. Do NOT fabricate additional quotes or community references beyond what is provided. Every practitioner reference must come from that section.`}`;
@@ -200,8 +200,13 @@ export function buildUserPrompt(
   assetType: AssetType,
   insights: ExtractedInsights,
   evidenceLevel?: EvidenceBundle['evidenceLevel'],
+  productName?: string,
 ): string {
   let userPrompt = '';
+
+  if (productName) {
+    userPrompt += `## Product Name\n**${productName}** — always use this exact name.\n\n`;
+  }
 
   if (insights.painPointsAddressed.length > 0) {
     userPrompt = `## The Pain (lead with this)
@@ -245,8 +250,15 @@ export function buildPoVFirstPrompt(
   assetType: AssetType,
   existingMessaging?: string,
   prompt?: string,
+  productName?: string,
 ): string {
-  let result = `## Our Point of View
+  let result = '';
+
+  if (productName) {
+    result += `## Product Name\n**${productName}** — always use this exact name.\n\n`;
+  }
+
+  result += `## Our Point of View
 ${povInsights.pointOfView}
 
 ## Thesis
@@ -297,8 +309,13 @@ export function buildPainFirstPrompt(
   template: string,
   assetType: AssetType,
   insights: ExtractedInsights,
+  productName?: string,
 ): string {
   let prompt = '';
+
+  if (productName) {
+    prompt += `## Product Name\n**${productName}** — always use this exact name.\n\n`;
+  }
 
   if (practitionerContext) {
     prompt += `## Real Practitioner Pain (this is your primary source material)
@@ -333,6 +350,7 @@ export function buildRefinementPrompt(
   voice: VoiceProfile,
   assetType: AssetType,
   wasDeslopped: boolean = false,
+  productName?: string,
 ): string {
   const issues: string[] = [];
 
@@ -363,8 +381,8 @@ ${content}
 1. Fix ONLY the flagged issues — don't change what's already working
 2. Keep the same structure and format
 3. Keep all factual claims and specific details
-4. Don't introduce new slop while fixing other issues
-5. Output ONLY the rewritten content, nothing else`;
+4. Don't introduce new slop while fixing other issues${productName ? `\n5. PRODUCT NAME: The product must be referred to as "${productName}"` : ''}
+${productName ? '6' : '5'}. Output ONLY the rewritten content, nothing else`;
 }
 
 export function buildResearchPromptFromInsights(insights: ExtractedInsights, prompt?: string): string {

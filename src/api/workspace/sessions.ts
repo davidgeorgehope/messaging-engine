@@ -1,5 +1,8 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
+import { eq, and, desc } from 'drizzle-orm';
+import { getDatabase } from '../../db/index.js';
+import { llmCalls } from '../../db/schema.js';
 import {
   createSession,
   startSessionGeneration,
@@ -309,6 +312,73 @@ app.get('/:id/action-status/:jobId', async (c) => {
   } catch (error) {
     logger.error('Failed to get action status', { jobId, error: error instanceof Error ? error.message : String(error) });
     return c.json({ error: 'Failed to get action status' }, 500);
+  }
+});
+
+// ===== LLM Call Log endpoints =====
+
+// GET /sessions/:id/llm-calls — list LLM calls for a session
+app.get('/:id/llm-calls', async (c) => {
+  const sessionId = c.req.param('id');
+  const purpose = c.req.query('purpose');
+  const page = parseInt(c.req.query('page') || '1');
+  const limit = Math.min(parseInt(c.req.query('limit') || '50'), 200);
+  const offset = (page - 1) * limit;
+
+  try {
+    const db = getDatabase();
+
+    const conditions = [eq(llmCalls.sessionId, sessionId)];
+    if (purpose) {
+      conditions.push(eq(llmCalls.purpose, purpose));
+    }
+
+    const where = conditions.length === 1 ? conditions[0] : and(...conditions);
+
+    const calls = await db.query.llmCalls.findMany({
+      where,
+      orderBy: [desc(llmCalls.timestamp)],
+      limit,
+      offset,
+      columns: {
+        id: true,
+        timestamp: true,
+        model: true,
+        purpose: true,
+        inputTokens: true,
+        outputTokens: true,
+        totalTokens: true,
+        cachedTokens: true,
+        latencyMs: true,
+        success: true,
+        errorMessage: true,
+        finishReason: true,
+      },
+    });
+
+    return c.json({ data: calls, meta: { page, limit } });
+  } catch (error) {
+    logger.error('Failed to list LLM calls', { sessionId, error: error instanceof Error ? error.message : String(error) });
+    return c.json({ error: 'Failed to list LLM calls' }, 500);
+  }
+});
+
+// GET /sessions/:id/llm-calls/:callId — get single LLM call with full payloads
+app.get('/:id/llm-calls/:callId', async (c) => {
+  const sessionId = c.req.param('id');
+  const callId = c.req.param('callId');
+
+  try {
+    const db = getDatabase();
+    const call = await db.query.llmCalls.findFirst({
+      where: and(eq(llmCalls.id, callId), eq(llmCalls.sessionId, sessionId)),
+    });
+
+    if (!call) return c.json({ error: 'LLM call not found' }, 404);
+    return c.json({ data: call });
+  } catch (error) {
+    logger.error('Failed to get LLM call', { sessionId, callId, error: error instanceof Error ? error.message : String(error) });
+    return c.json({ error: 'Failed to get LLM call' }, 500);
   }
 });
 

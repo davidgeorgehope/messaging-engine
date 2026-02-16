@@ -34,7 +34,7 @@ export async function runMultiPerspectivePipeline(jobId: string, inputs: JobInpu
   }));
 
   // Step 2: Community + Competitive Research in parallel
-  emitPipelineStep(jobId, 'research', 'running', { model: getModelForTask('flash') });
+  emitPipelineStep(jobId, 'research', 'running', { model: getModelForTask('deepResearch') });
   updateJobProgress(jobId, { currentStep: `Running community & competitive research... [${getModelForTask('deepResearch')}]`, progress: 5 });
 
   const [evidence, competitiveResult] = await Promise.all([
@@ -60,10 +60,10 @@ export async function runMultiPerspectivePipeline(jobId: string, inputs: JobInpu
     for (const voice of selectedVoices) {
       const thresholds = parseScoringThresholds(voice.scoringThresholds);
       const bannedWords = voiceBannedWords.get(voice.id);
-      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel, undefined, bannedWords);
+      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel, undefined, bannedWords, insights.productName);
 
       try {
-        const baseContext = buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel);
+        const baseContext = buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel, insights.productName);
 
         const empathyAngle = `${baseContext}
 
@@ -125,7 +125,7 @@ Output ONLY the synthesized content. No meta-commentary.`;
         // Refinement loop
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'running');
         updateJobProgress(jobId, { currentStep: `Refining — ${voice.name} [${getModelForTask('pro')}]` });
-        const result = await refinementLoop(synthesizedResponse.text, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
+        const result = await refinementLoop(synthesizedResponse.text, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel, 3, insights.productName);
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores, scorerHealth: result.scores.scorerHealth });
 
         // Store

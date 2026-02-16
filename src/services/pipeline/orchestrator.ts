@@ -15,8 +15,10 @@ import type { AssetType } from '../../services/generation/types.js';
 import type { GenerateOptions, AIResponse } from '../../services/ai/types.js';
 import { generateWithClaude, generateWithGemini } from '../../services/ai/clients.js';
 import { getModelForTask } from '../../config.js';
+import { withLLMContext } from '../../services/ai/call-context.js';
 import { ASSET_TYPE_LABELS, ASSET_TYPE_TEMPERATURE, buildRefinementPrompt } from './prompts.js';
 import type { EvidenceBundle } from './evidence.js';
+import { sessions } from '../../db/schema.js';
 
 const logger = createLogger('pipeline:orchestrator');
 
@@ -160,6 +162,7 @@ export async function refinementLoop(
   systemPrompt: string,
   model: string,
   maxIterations: number = 3,
+  productName?: string,
 ): Promise<GenerateAndScoreResult> {
   let scores = await scoreContent(content, [scoringContext]);
   let wasDeslopped = false;
@@ -187,7 +190,7 @@ export async function refinementLoop(
       }
     }
 
-    const refinementPrompt = buildRefinementPrompt(content, scores, thresholds, voice, assetType, wasDeslopped);
+    const refinementPrompt = buildRefinementPrompt(content, scores, thresholds, voice, assetType, wasDeslopped, productName);
     try {
       const refined = await generateContent(refinementPrompt, {
         systemPrompt,
@@ -356,6 +359,16 @@ export async function runPublicGenerationJob(jobId: string): Promise<void> {
   const pipeline = inputs.pipeline || 'standard';
   const runner = PIPELINE_RUNNERS[pipeline] || PIPELINE_RUNNERS.standard;
 
-  logger.info('Starting pipeline', { jobId, pipeline });
-  await runner(jobId, inputs);
+  // Look up session for this job so LLM calls can be linked to the session
+  let sessionId: string | undefined;
+  try {
+    const db = getDatabase();
+    const session = await db.query.sessions.findFirst({ where: eq(sessions.jobId, jobId) });
+    sessionId = session?.id;
+  } catch { /* best effort */ }
+
+  logger.info('Starting pipeline', { jobId, pipeline, sessionId });
+  await withLLMContext({ purpose: `pipeline:${pipeline}`, jobId, sessionId }, async () => {
+    await runner(jobId, inputs);
+  });
 }

@@ -35,14 +35,14 @@ export async function runAdversarialPipeline(jobId: string, inputs: JobInputs): 
   }));
 
   // Step 2: Community research
-  emitPipelineStep(jobId, 'community-research', 'running', { model: getModelForTask('flash') });
+  emitPipelineStep(jobId, 'community-research', 'running', { model: getModelForTask('deepResearch') });
   updateJobProgress(jobId, { currentStep: `Running community deep research... [${getModelForTask('deepResearch')}]`, progress: 5 });
   const evidence = await runCommunityDeepResearch(insights, prompt);
   emitPipelineStep(jobId, 'community-research', 'complete');
 
   // Step 3: Competitive research
-  emitPipelineStep(jobId, 'competitive-research', 'running', { model: getModelForTask('flash') });
-  updateJobProgress(jobId, { currentStep: `Running competitive research... [${getModelForTask('flash')}]`, progress: 10 });
+  emitPipelineStep(jobId, 'competitive-research', 'running', { model: getModelForTask('deepResearch') });
+  updateJobProgress(jobId, { currentStep: `Running competitive research... [${getModelForTask('deepResearch')}]`, progress: 10 });
   let competitivePromptExtra = prompt || '';
   if (evidence.communityContextText) {
     competitivePromptExtra += '\n\nCommunity findings to inform competitive analysis:\n' + evidence.communityContextText.substring(0, 2000);
@@ -67,8 +67,8 @@ export async function runAdversarialPipeline(jobId: string, inputs: JobInputs): 
     for (const voice of selectedVoices) {
       const thresholds = parseScoringThresholds(voice.scoringThresholds);
       const bannedWords = voiceBannedWords.get(voice.id);
-      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel, undefined, bannedWords);
-      const userPrompt = buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel);
+      const systemPrompt = buildSystemPrompt(voice, assetType, evidence.evidenceLevel, undefined, bannedWords, insights.productName);
+      const userPrompt = buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel, insights.productName);
       const productInsightsText = formatInsightsForPrompt(insights);
 
       try {
@@ -142,7 +142,7 @@ Output ONLY the rewritten content. No meta-commentary.`;
         // Refinement loop
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'running');
         updateJobProgress(jobId, { currentStep: `Refining — ${voice.name} [${getModelForTask('pro')}]` });
-        const result = await refinementLoop(currentContent, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel);
+        const result = await refinementLoop(currentContent, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel, 3, insights.productName);
         emitPipelineStep(jobId, `refine-${assetType}-${voice.slug}`, 'complete', { scores: result.scores, scorerHealth: result.scores.scorerHealth });
 
         // Store
