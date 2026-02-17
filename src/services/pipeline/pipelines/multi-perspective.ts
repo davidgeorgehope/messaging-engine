@@ -33,17 +33,17 @@ export async function runMultiPerspectivePipeline(jobId: string, inputs: JobInpu
     voiceBannedWords.set(voice.id, await getBannedWordsForVoice(voice, insights));
   }));
 
-  // Step 2: Community + Competitive Research in parallel
+  // Step 2: Community research, then competitive (sequential to respect deep research RPM limits)
   emitPipelineStep(jobId, 'research', 'running', { model: getModelForTask('deepResearch') });
-  updateJobProgress(jobId, { currentStep: `Running community & competitive research... [${getModelForTask('deepResearch')}]`, progress: 5 });
+  updateJobProgress(jobId, { currentStep: `Running community research... [${getModelForTask('deepResearch')}]`, progress: 5 });
 
-  const [evidence, competitiveResult] = await Promise.all([
-    runCommunityDeepResearch(insights, prompt),
-    runCompetitiveResearch(insights, prompt).catch(error => {
-      logger.warn('Competitive research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
-      return '';
-    }),
-  ]);
+  const evidence = await runCommunityDeepResearch(insights, prompt);
+
+  updateJobProgress(jobId, { currentStep: `Running competitive research... [${getModelForTask('deepResearch')}]`, progress: 10 });
+  const competitiveResult = await runCompetitiveResearch(insights, prompt).catch(error => {
+    logger.warn('Competitive research failed', { jobId, error: error instanceof Error ? error.message : String(error) });
+    return '';
+  });
 
   let researchContext = competitiveResult;
   if (evidence.communityContextText) {

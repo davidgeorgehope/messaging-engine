@@ -39,13 +39,20 @@ export async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Pr
 
   const MAX_EVIDENCE_RETRIES = 3;
   let evidence = await runCommunityDeepResearch(insights, prompt);
+  let lastError = evidence.error;
 
   // Retry the entire community research call if we got nothing
+  // Skip retries if the error suggests a non-recoverable failure (quota, auth, billing)
   for (let attempt = 1; attempt <= MAX_EVIDENCE_RETRIES && evidence.evidenceLevel === 'product-only'; attempt++) {
+    if (lastError && /quota|limit|exceeded|billing|unauthorized|forbidden/i.test(lastError)) {
+      logger.warn('Skipping retries — error appears non-recoverable', { jobId, error: lastError });
+      break;
+    }
     logger.warn('Community research returned no evidence, retrying', { jobId, attempt, maxRetries: MAX_EVIDENCE_RETRIES });
     updateJobProgress(jobId, { currentStep: `Community research empty — retry ${attempt}/${MAX_EVIDENCE_RETRIES} [${getModelForTask('deepResearch')}]` });
     await new Promise(r => setTimeout(r, 3000 * attempt));
     evidence = await runCommunityDeepResearch(insights, prompt);
+    lastError = evidence.error;
   }
 
   emitPipelineStep(jobId, 'community-research', 'complete');
@@ -53,8 +60,11 @@ export async function runOutsideInPipeline(jobId: string, inputs: JobInputs): Pr
   let practitionerContext = evidence.communityContextText;
 
   if (evidence.evidenceLevel === 'product-only') {
-    logger.error('All community research retries exhausted — no real evidence found, failing pipeline', { jobId });
-    throw new Error('Outside-in pipeline requires real community evidence. Grounded search returned no results after all retries. Try again or use a different pipeline.');
+    const reason = lastError
+      ? `Deep research failed: ${lastError}`
+      : 'Deep research returned no practitioner evidence after all retries';
+    logger.error('Community research failed — no real evidence', { jobId, reason });
+    throw new Error(`Outside-in pipeline requires real community evidence. ${reason}. Try again or use a different pipeline.`);
   }
 
   updateJobProgress(jobId, { currentStep: `Generating pain-grounded drafts... [${getModelForTask('pro')}]`, progress: 15 });

@@ -21,6 +21,7 @@ export interface EvidenceBundle {
   communityContextText: string;
   evidenceLevel: 'strong' | 'partial' | 'product-only';
   sourceCounts: Record<string, number>;
+  error?: string;
 }
 
 export function classifyEvidenceLevel(
@@ -115,8 +116,9 @@ Be specific. Include actual quotes with source URLs.`;
       sourceCounts,
     };
   } catch (error) {
-    logger.error('Community Deep Research failed', { error: error instanceof Error ? error.message : String(error) });
-    return emptyBundle;
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    logger.error('Community Deep Research failed', { error: errorMsg });
+    return { ...emptyBundle, error: errorMsg };
   }
 }
 
