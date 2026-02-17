@@ -2,320 +2,376 @@
 
 ## Project Overview
 
-This is the **PMM Messaging Engine**, an automated system that converts practitioner pain points discovered from community sources into scored, traceable messaging assets. It forks patterns from two existing projects and combines them with AI-powered generation (Gemini by default) and a voice profile system.
+This is the **PMM Messaging Engine**, an automated system that converts practitioner pain points and product documentation into scored, traceable messaging assets. It uses AI-powered generation (Gemini by default) with a voice profile system, community evidence grounding, and a workspace UI for iterative refinement.
 
 **Core value proposition**: Every messaging asset is grounded in real community evidence, enriched with competitive intelligence, generated in a controlled voice, stress-tested for quality, and fully traceable back to its source.
 
 ## Tech Stack
 
-- **Runtime**: Node.js + TypeScript
-- **Backend**: Hono (lightweight, fast, edge-compatible web framework)
+- **Runtime**: Node.js + TypeScript (ESM)
+- **Backend**: Hono (lightweight web framework)
 - **Database**: SQLite via better-sqlite3 + Drizzle ORM
-- **Admin UI**: Vite + React + React Router + Tailwind CSS (in `admin/` directory)
-- **AI Models**: Gemini Flash (scoring), Gemini Pro (generation, deslop), Gemini Deep Research (community/competitive research), Claude (optional override)
-- **Scheduler**: node-cron
-- **Auth**: JWT (jsonwebtoken)
+- **Admin UI**: Vite + React + React Router + Tailwind CSS (in `admin/`)
+- **AI Models**: Gemini Flash (scoring, classification), Gemini Pro (generation, deslop), Gemini Deep Research (community/competitive research), Claude (optional override)
+- **Auth**: JWT via jose (jsonwebtoken replacement), bcryptjs for passwords
 - **IDs**: nanoid (21-character string IDs)
-
-## Source Project References
-
-This project forks patterns from two existing codebases. Refer to them for implementation patterns:
-
-- **o11y.tips** at `/root/o11y.tips` — Source for the discovery pipeline (source adapters, scheduling, pain point extraction), the quality pipeline (multi-dimension scoring, persona critics, quality gates), the admin UI scaffold (Vite + React + Tailwind layout, page structure), and the settings/config pattern. When building discovery or quality features, check the o11y.tips implementation first.
-
-- **compintels** at `/root/compintels` — Source for the competitive research pipeline via Gemini Deep Research (async job submission, polling, structured result parsing). When building the research service, check the compintels implementation first.
+- **Process Manager**: PM2 via `ecosystem.config.cjs`
+- **Testing**: Vitest (5min timeout per test)
 
 ## Key Architectural Decisions
 
-1. **SQLite over PostgreSQL**: Single-file database for simplicity. This is an internal PMM tool, not a high-concurrency production service. The o11y.tips project proved this works well for this class of application.
+1. **SQLite over PostgreSQL**: Single-file database for simplicity. This is an internal PMM tool, not a high-concurrency service.
 
-2. **Multi-model AI strategy**: Each model is selected for its specific strength. Do not consolidate to a single model. See the model table below.
+2. **Model Profile System**: `MODEL_PROFILE` env var switches all models between production (Gemini 3) and test (all Gemini 2.5 Flash). See `getModelForTask()` in `config.ts`.
 
-3. **JSON in TEXT columns**: Complex nested data (arrays, objects) is stored as JSON-serialized TEXT columns in SQLite. This avoids junction tables for many-to-many relationships. Always use `JSON.parse()` on read and `JSON.stringify()` on write.
+3. **JSON in TEXT columns**: Complex nested data stored as JSON-serialized TEXT in SQLite. Always `JSON.parse()` on read, `JSON.stringify()` on write.
 
-4. **Traceability as first-class concern**: Every messaging asset must have a complete `asset_traceability` record. Never generate an asset without recording its full input chain.
+4. **Traceability as first-class concern**: Every messaging asset has a complete `asset_traceability` record linking back to pain points, research, product docs, and generation prompts.
 
-5. **Voice profiles drive quality gates**: Quality scoring thresholds are per-voice-profile, not global. A developer audience voice has different quality bars than an executive audience voice.
+5. **Voice profiles drive quality gates**: Scoring thresholds are per-voice-profile, not global. Different audiences have different quality bars.
 
-6. **Async research**: Gemini Deep Research is inherently async (jobs take 1-5 minutes). The system submits jobs and polls for results via the scheduler, never blocking.
+6. **LLM call logging**: Every AI call is logged to the `llm_calls` table via fire-and-forget `logCall()`. Context is threaded via AsyncLocalStorage (`withLLMContext()`).
+
+7. **Pipeline composability**: All 5 pipelines share core primitives from `orchestrator.ts` (generateAndScore, refinementLoop, storeVariant). Workspace actions also compose from these primitives.
 
 ## Database
 
 - **ORM**: Drizzle with better-sqlite3 driver
-- **Schema**: `src/db/schema.ts` — 14 tables
-- **Migrations**: Managed by Drizzle Kit (`drizzle.config.ts`)
+- **Schema**: `src/db/schema.ts` — **20 tables**
+- **Migrations**: Drizzle Kit (`drizzle.config.ts`)
 - **Connection**: `src/db/index.ts`
 
-### 14 Tables
+### 20 Tables
 
 1. `messaging_priorities` — Strategic messaging themes
 2. `discovery_schedules` — Source polling configuration
 3. `discovered_pain_points` — Extracted pain points from community sources
-4. `generation_jobs` — Messaging generation job tracking
+4. `generation_jobs` — Messaging generation job tracking with pipeline steps
 5. `settings` — Key-value system configuration
 6. `product_documents` — Uploaded product context documents
-7. `messaging_assets` — Generated messaging assets (the primary output)
+7. `messaging_assets` — Generated messaging assets (primary output)
 8. `persona_critics` — AI critic personas for quality scoring
-9. `persona_scores` — Individual scores per (asset, critic, dimension)
+9. `persona_scores` — Individual scores per (asset, critic)
 10. `competitive_research` — Gemini Deep Research results
 11. `asset_traceability` — Full evidence chain for each asset
 12. `messaging_gaps` — Identified messaging coverage gaps
 13. `voice_profiles` — Voice/tone profiles for generation and scoring
-14. `asset_variants` — Alternate versions of assets (deslop, regeneration, edits)
+14. `asset_variants` — Alternate versions of assets per voice profile
+15. `users` — Workspace user accounts (bcrypt passwords, roles)
+16. `sessions` — Workspace sessions (pain point, voice, asset types, pipeline config)
+17. `session_versions` — Versioned asset content per session with scores and source tracking
+18. `session_messages` — Chat refinement message history per session
+19. `action_jobs` — Async background workspace actions with progress tracking
+20. `llm_calls` — Every LLM call logged (model, purpose, tokens, latency, success)
 
-See `DATABASE.md` for complete schema with all fields, types, and constraints.
+See `DATABASE.md` for complete schema details.
 
-## Multi-Model AI Usage
+## Model Profile System
 
-| Model | Client File | Used For | When to Choose |
-|-------|-------------|----------|----------------|
-| **Gemini Flash** | `src/ai/gemini-flash.ts` | Pain point extraction, severity/relevance scoring, quality dimension scoring, session naming | High-volume, structured output, cost-sensitive operations |
-| **Gemini Pro** | `src/ai/gemini-pro.ts` | Messaging generation (all asset types), slop detection, deslop rewrites | Default model for all generation and quality tasks |
-| **Gemini Deep Research** | `src/ai/gemini-deep-research.ts` | Community and competitive research | Multi-step web research with source citations (async) |
-| **Claude** | `src/ai/claude.ts` | Available as optional override when explicitly selected | Only used when user picks Claude in the UI |
+Controlled by `MODEL_PROFILE` env var (`'production'` | `'test'`).
 
-**Default model is Gemini.** Claude is only used when explicitly selected (model string contains 'claude'). Do not default to Claude anywhere.
+| Task | Production Model | Test Model |
+|------|-----------------|------------|
+| flash | gemini-3-flash-preview | gemini-2.5-flash |
+| pro | gemini-3-pro-preview | gemini-2.5-flash |
+| deepResearch | deep-research-pro-preview | gemini-2.5-flash |
+| generation | gemini-3-pro-preview | gemini-2.5-flash |
+| scoring | gemini-3-flash-preview | gemini-2.5-flash |
+| deslop | gemini-3-pro-preview | gemini-2.5-flash |
 
-**Rule of thumb**: Gemini is the default for everything. Flash for scoring/classifying, Pro for generation/rewriting, Deep Research for web research. Claude is an opt-in override only.
+Use `getModelForTask(task)` from `config.ts` — never hardcode model names. Claude (`claude-opus-4-6`) is opt-in override only when user explicitly selects it.
 
-**Token limits**: Do not hardcode `maxTokens` unless you need more than the 8192 default. Newer models have much higher token limits, and low hardcoded values cause silent truncation.
+## LLM Call Logging
 
-**JSON generation resilience**: `generateJSON()` in `src/services/ai/clients.ts` retries with error feedback on parse failures — it sends the parse error and broken response back to the model so it can self-correct (up to `maxParseRetries` attempts).
+- **`src/services/ai/call-logger.ts`** — `logCall()` persists every LLM call to the `llm_calls` table. Fire-and-forget, never throws.
+- **`src/services/ai/call-context.ts`** — `withLLMContext({purpose, jobId, sessionId}, fn)` uses AsyncLocalStorage to thread context through async call chains. All LLM calls within `fn` automatically inherit the context for logging.
+- Every call in `src/services/ai/clients.ts` (generateWithClaude, generateWithGemini, generateWithGeminiGroundedSearch) calls `logCall()` on success and failure.
 
-## Voice Profile System
+## 5 Generation Pipelines
 
-Voice profiles (`voice_profiles` table) define:
-- **Tone attributes**: `{formality, technical_depth, empathy, urgency}` each 0-100
-- **Vocabulary rules**: `{preferred_terms[], banned_terms[], jargon_policy}`
-- **Quality gates**: `{slop: min, vendor_speak: min, authenticity: min, specificity: min, persona_fit: min}`
-- **Example snippets**: Reference text exemplifying the voice
-- **System prompt prefix**: Additional instructions injected into generation prompts
+1. **Standard** — Deep PoV extraction → community + competitive research → PoV-first generation → refinement loop
+2. **Outside-In** — Community-first; fails hard if no real evidence (no fallback). Pain-grounded draft → competitive enrichment → refinement
+3. **Adversarial** — Generate → 2 rounds of attack/defend → refinement loop
+4. **Multi-Perspective** — 3 perspective rewrites (empathy, competitive, thought leadership) → synthesize → refinement loop
+5. **Straight-Through** — Score-only, no generation. Evaluates existing messaging content
 
-Voice profiles are injected into generation prompts and used as the thresholds for quality gate evaluation. An asset passes quality gates only if it meets all dimension minimums defined by its voice profile.
+All pipelines dispatch via `PIPELINE_RUNNERS` map in `orchestrator.ts`.
+
+## 8 Asset Types
+
+| Type | Label | Template |
+|------|-------|---------|
+| `battlecard` | Battlecard | `templates/battlecard.md` |
+| `talk_track` | Talk Track | `templates/talk-track.md` |
+| `launch_messaging` | Launch Messaging | `templates/launch-messaging.md` |
+| `social_hook` | Social Hook | `templates/social-hook.md` |
+| `one_pager` | One-Pager | `templates/one-pager.md` |
+| `email_copy` | Email Copy | `templates/email-copy.md` |
+| `messaging_template` | Messaging Template | `templates/messaging-template.md` |
+| `narrative` | Narrative | `templates/narrative.md` |
+
+Each has a generation temperature defined in `ASSET_TYPE_TEMPERATURE` (range 0.5–0.85).
 
 ## Quality Gates
 
-5 scoring dimensions, each 0-100:
-1. **Slop** (inverted) — Low AI cliches and filler language. High = clean.
-2. **Vendor-Speak** (inverted) — Low self-congratulatory vendor language. High = practitioner-focused.
-3. **Authenticity** — Sounds like a real human wrote it.
-4. **Specificity** — Uses concrete details, not vague generalities.
-5. **Persona-Fit** — Resonates with the target persona.
+5 scoring dimensions (0–10 scale):
+1. **Slop** (inverted — lower is better) — AI cliches, filler language
+2. **Vendor-Speak** (inverted — lower is better) — Self-congratulatory vendor language
+3. **Authenticity** (higher is better) — Sounds like a real human wrote it
+4. **Specificity** (higher is better) — Concrete details, not vague generalities
+5. **Persona-Fit** (higher is better) — Resonates with target persona
 
-Each dimension is scored by multiple persona critics. The per-dimension average across critics is compared against the voice profile's quality gate thresholds. All dimensions must pass for `passed_quality_gate = 1`.
+Scoring is centralized in `src/services/quality/score-content.ts`. All 5 scorers run in parallel with fallback to score 5 on failure. `ScorerHealth` tracks which scorers succeeded/failed.
+
+### Banned Words System
+- `DEFAULT_BANNED_WORDS` constant: 13 common vendor-speak phrases
+- `generateBannedWords()`: LLM-generated per-voice banned words (retries 3x with backoff)
+- Cached per `voiceId:domain` in memory
+
+## Workspace System
+
+The workspace provides a session-based UI for creating, refining, and managing messaging assets.
+
+### Core Components
+- **Sessions** (`src/services/workspace/sessions.ts`) — Create sessions with pain point, voice profile(s), asset types, product docs, pipeline selection. Auto-names via Gemini Flash from extracted insights.
+- **Versions** (`src/services/workspace/versions.ts`) — Every change creates a new version with scores. `isActive` flag tracks which version is current. Supports activation of any previous version.
+- **Chat** (`src/services/workspace/chat-context.ts`) — Conversational refinement with context assembly (system prompt + voice guide + product context + active versions + message history). 150K token budget with oldest-first trimming.
+- **Actions** (`src/services/workspace/actions.ts`) — Workspace-specific actions: deslop, regenerate, voice change, adversarial loop, competitive deep dive, community check, multi-perspective rewrite. All compose from pipeline primitives.
+- **Action Runner** (`src/services/workspace/action-runner.ts`) — Fire-and-forget background execution with progress tracking via `action_jobs` table.
+
+### Auth
+- **`src/services/auth/users.ts`** — User registration/login. First user auto-gets admin role. Passwords hashed with bcryptjs (12 rounds).
+- Fallback to env var admin credentials for backwards compatibility.
+- JWT tokens via jose with configurable expiration (default 7d).
+
+## API Routes
+
+### Public (rate limited, no auth)
+- `POST /api/upload` — File upload
+- `POST /api/extract` — Text extraction from uploaded files
+- `GET /api/voices` — Active voice profiles
+- `GET /api/asset-types` — Available asset types
+- `GET /api/history` — Past generations
+- `POST /api/auth/login` — Login (users table + env var fallback)
+- `POST /api/auth/signup` — User registration
+
+### Admin (JWT auth required)
+- `/api/admin/documents` — Product document CRUD
+- `/api/admin/voices` — Voice profile CRUD
+- `/api/admin/settings` — Settings management
+- `GET /api/admin/stats` — Dashboard statistics
+
+### Workspace (JWT auth required)
+- `GET /api/workspace/sessions` — List user sessions
+- `POST /api/workspace/sessions` — Create + start session
+- `GET /api/workspace/sessions/:id` — Get session with results/versions
+- `GET /api/workspace/sessions/:id/status` — Poll generation progress
+- `PATCH /api/workspace/sessions/:id` — Update session (name, archive)
+- `DELETE /api/workspace/sessions/:id` — Delete session
+- `GET /api/workspace/sessions/:id/versions/:assetType` — List versions
+- `POST /api/workspace/sessions/:id/versions/:assetType/edit` — Create edit version
+- `POST /api/workspace/sessions/:id/versions/:versionId/activate` — Activate version
+- `POST /api/workspace/sessions/:id/actions/:assetType/:action` — Run workspace action
+- `GET /api/workspace/sessions/:id/actions/:jobId` — Poll action progress
+- `POST /api/workspace/sessions/:id/chat` — SSE streaming chat refinement
+- `GET /api/workspace/sessions/:id/messages` — Chat message history
+- `GET /api/workspace/sessions/:id/llm-calls` — LLM call log for session
 
 ## Key File Locations
 
 ```
 src/
-  index.ts                              # Server entry point
-  config.ts                             # Configuration management
+  index.ts                              # Server entry — Hono + static files + SPA routing
+  config.ts                             # Config + Model Profile System (getModelForTask)
   db/
-    schema.ts                           # All 14 table definitions
-    index.ts                            # Database connection
-  ai/
-    gemini-flash.ts                     # Gemini Flash client
-    gemini-pro.ts                       # Gemini Pro client
-    gemini-deep-research.ts             # Gemini Deep Research client
-    claude.ts                           # Claude client
-    types.ts                            # Shared AI types
-  api/
-    index.ts                            # Hono app and route registration
-    middleware/auth.ts                   # JWT auth middleware
-    middleware/error.ts                  # Error handling middleware
+    schema.ts                           # All 20 table definitions
+    index.ts                            # Database connection + initialization
+    seed.ts                             # Seed data (voice profiles, priorities)
   services/
-    discovery/
-      orchestrator.ts                   # Discovery pipeline coordinator
-      adapters/                         # Source adapters (reddit, hn, etc.)
-      extractor.ts                      # Pain point extraction
-      scorer.ts                         # Severity/relevance scoring
-      deduplicator.ts                   # Deduplication logic
-      prompts/                          # Discovery prompt templates
-    product/
-      upload.ts                         # Document upload handling
-      parser.ts                         # Multi-format document parsing
-      chunker.ts                        # Content chunking
-      retriever.ts                      # Relevant chunk retrieval
-    research/
-      orchestrator.ts                   # Research pipeline coordinator
-      deep-research.ts                  # Gemini Deep Research adapter
-      query-builder.ts                  # Research query construction
-      parser.ts                         # Research result parsing
-    generation/
-      orchestrator.ts                   # Generation pipeline coordinator
-      engine.ts                         # Core generation logic
-      context-assembler.ts              # Context assembly for prompts
-      traceability.ts                   # Traceability recording
-      voice-profiles.ts                 # Voice profile management
-      prompts/                          # Per-asset-type prompt templates
+    ai/
+      clients.ts                        # Gemini + Claude clients, grounded search, deep research, JSON generation
+      call-logger.ts                    # Fire-and-forget LLM call logging
+      call-context.ts                   # AsyncLocalStorage context threading
+      types.ts                          # AI type definitions
+    auth/
+      users.ts                          # User registration, authentication, lookup
+    pipeline/
+      orchestrator.ts                   # Shared pipeline primitives + dispatch
+      evidence.ts                       # Community/competitive research bundling
+      prompts.ts                        # All prompt builders, templates, banned words
+      pipelines/
+        standard.ts                     # Standard pipeline
+        outside-in.ts                   # Outside-in pipeline
+        adversarial.ts                  # Adversarial pipeline
+        multi-perspective.ts            # Multi-perspective pipeline
+        straight-through.ts             # Score-only pipeline
+    workspace/
+      sessions.ts                       # Session CRUD + generation kickoff
+      versions.ts                       # Version management
+      actions.ts                        # Workspace actions (deslop, regenerate, etc.)
+      action-runner.ts                  # Background action execution
+      chat-context.ts                   # Chat context assembly
     quality/
-      orchestrator.ts                   # Quality pipeline coordinator
-      scorer.ts                         # Multi-dimension scoring engine
-      gates.ts                          # Quality gate evaluator
-      deslop.ts                         # Slop detection and rewrite
-      critics.ts                        # Persona critic management
-      dimensions/                       # Per-dimension scoring logic
-    scheduler/index.ts                  # node-cron scheduler
-    auth/index.ts                       # JWT auth service
+      score-content.ts                  # Centralized scoring (5 parallel scorers)
+      slop-detector.ts                  # Pattern detection + AI slop analysis
+      vendor-speak.ts                   # Vendor language scoring
+      authenticity.ts                   # Human-likeness scoring
+      specificity.ts                    # Concrete detail scoring
+      persona-critic.ts                 # Persona fit scoring
+      grounding-validator.ts            # Fabrication detection + stripping
+    product/
+      insights.ts                       # Product insight extraction + formatting
+    research/
+      deep-research.ts                  # Deep Research interaction management
+    documents/
+      manager.ts                        # Document management
+    discovery/
+      types.ts                          # Discovery type definitions
+    generation/
+      types.ts                          # AssetType definition
+  api/
+    index.ts                            # Route registration + auth endpoints
+    generate.ts                         # Public generation routes + re-exports
+    validation.ts                       # Zod request schemas
+    middleware/
+      auth.ts                           # JWT auth (admin + workspace middleware)
+      rate-limit.ts                     # Token bucket rate limiter
+    admin/
+      documents.ts                      # Product document routes
+      voices.ts                         # Voice profile routes
+      settings.ts                       # Settings routes
+    workspace/
+      index.ts                          # Workspace route mounting
+      sessions.ts                       # Session + version + action routes
+      chat.ts                           # SSE chat streaming routes
+  types/
+    index.ts                            # Centralized type exports
   utils/
-    id.ts                               # generateId() — nanoid
-    timestamp.ts                        # now() — ISO 8601
-    json.ts                             # Safe JSON parse/stringify
-    retry.ts                            # Retry with exponential backoff
-    rate-limit.ts                       # Token bucket rate limiter
-    logger.ts                           # Structured logging
-    errors.ts                           # Custom error classes
-  types/                                # Shared TypeScript types
+    hash.ts                             # generateId() + hashContent()
+    logger.ts                           # Structured logging (pino-style)
+    retry.ts                            # withRetry, withTimeout, createRateLimiter
 
-templates/                                # Markdown prompt templates per asset type
-  battlecard.md
-  talk-track.md
-  launch-messaging.md
-  social-hook.md
-  one-pager.md
-  email-copy.md
-  messaging-template.md                  # Comprehensive positioning document
-  narrative.md                            # 3-variant storytelling
-
+templates/                              # Markdown prompt templates (8 asset types)
 tests/
-  e2e/pipeline.test.ts                    # End-to-end pipeline test
+  e2e/                                  # End-to-end pipeline tests
+    pipeline.test.ts                    # Single pipeline test
+    all-pipelines.test.ts               # All 5 pipelines
+    community-evidence.test.ts          # Evidence grounding test
+    spirit-scoring.ts                   # LLM-based spirit validation
+  unit/                                 # Unit tests
+    architecture/                       # model-profile-guard, no-cron
+    auth/                               # auth tests
+    product/                            # insights tests
+    quality/                            # gates, score-content, slop-detector, product-filter
+    workspace/                          # versions, chat-context, naming, multi-voice, version-activation, adversarial-loop, go-outside-integrity, actions-integrity
+  integration/                          # Integration tests
+    naming-gemini.test.ts               # Session naming with real Gemini
+  debug/                                # Debug utilities
 
-vitest.config.ts                          # Vitest configuration
-ecosystem.config.cjs                      # pm2 process config
-
-admin/                                  # Vite + React admin UI
-  src/
-    pages/                              # 10 page components
-    components/                         # Shared UI components
-    hooks/                              # Custom React hooks
-    api/                                # API client
-    App.tsx                             # Router setup
-    main.tsx                            # Entry point
+admin/                                  # Vite + React admin/workspace UI
+vitest.config.ts                        # 5min timeout, forks pool, single fork (SQLite)
+ecosystem.config.cjs                    # PM2 config
+deploy.sh                              # Build + commit + PM2 restart
+start.sh / stop.sh                      # PM2 start/stop wrappers
 ```
+
+## Evidence & Research
+
+### Grounded Search
+- `generateWithGeminiGroundedSearch()` uses Gemini's `googleSearch` tool
+- Retries up to 5x on empty results (flaky API behavior)
+- Extracts sources from `groundingMetadata.groundingChunks`
+
+### Community Deep Research
+- Uses Gemini Deep Research agent for multi-step web research
+- Searches Reddit, HN, Stack Overflow, GitHub Issues, dev blogs
+- Returns practitioner quotes, source URLs, evidence level classification
+- Evidence levels: `strong` (3+ sources, 2+ types), `partial` (1+ source or grounded search), `product-only`
+- Retries 3x full community research if no evidence found
+
+### Competitive Research
+- Deep research focused on competitor analysis
+- Used by Standard, Outside-In, Adversarial pipelines
+- Workspace action "Competitive Deep Dive" runs standalone competitive enrichment
 
 ## Common Tasks
 
-### Adding a New Community Source
-
-1. Create a new adapter in `src/services/discovery/adapters/` following the existing adapter pattern
-2. Implement the `SourceAdapter` interface: `fetchSince(lastRunAt: string): Promise<DiscoveredContent[]>`
-3. Register the adapter in `src/services/discovery/adapters/index.ts` factory
-4. Add the source type string to the `source_type` union in the schema
-5. Add source-specific configuration validation
-6. Test with a manual run via `POST /api/discovery/schedules/:id/run`
-
 ### Adding a New Asset Type
 
-1. Create a new prompt template in `src/services/generation/prompts/` (e.g., `webinar-script.ts`)
-2. Follow the existing template pattern: system prompt, context sections, format requirements, anti-slop instructions
-3. Add the asset type string to the `asset_type` union in the schema
-4. Register in the generation engine's type dispatch
-5. Define default max tokens and format expectations for the new type
-6. Add the type to the admin UI's asset type filter and generation wizard
+1. Create template in `templates/` (e.g., `new-type.md`)
+2. Add to `ALL_ASSET_TYPES` array in `src/services/pipeline/prompts.ts`
+3. Add entry in `ASSET_TYPE_LABELS` and `ASSET_TYPE_TEMPERATURE`
+4. Add type to the `AssetType` union in `src/services/generation/types.ts`
 
-### Adding a New Scoring Dimension
+### Adding a New Pipeline
 
-1. Create a new dimension file in `src/services/quality/dimensions/` (e.g., `urgency.ts`)
-2. Define evaluation criteria, scoring prompt template, and examples of high/low scores
-3. Add the dimension string to the `dimension` union in the schema
-4. Add the dimension to the quality gate evaluator in `src/services/quality/gates.ts`
-5. Add a default threshold for the new dimension in voice profile quality gates
-6. Update the admin UI's score visualization to include the new dimension
+1. Create pipeline file in `src/services/pipeline/pipelines/`
+2. Export `runMyPipeline(jobId, inputs)` function
+3. Register in `PIPELINE_RUNNERS` map in `orchestrator.ts`
+4. Compose from shared primitives: `generateAndScore`, `refinementLoop`, `storeVariant`, `finalizeJob`
 
-### Adding a New Persona Critic
+### Adding a New Workspace Action
 
-1. Insert a new row into `persona_critics` via the admin UI or API
-2. Define: name, role, perspective, scoring prompt, weight
-3. The scoring engine automatically includes all active critics — no code changes needed
-4. Consider adjusting weights if the new critic should have more or less influence
+1. Add action function in `src/services/workspace/actions.ts`
+2. Use `withLLMContext()` for automatic call logging
+3. Use `createVersionAndActivate()` to store results
+4. Register in the action dispatch in `src/api/workspace/sessions.ts`
 
 ## Environment Setup
-
-### Prerequisites
-
-- Node.js 20+
-- npm or pnpm
-
-### Installation
 
 ```bash
 cd /root/messaging-engine
 npm install
 
-# Set up environment variables
+# Environment variables
 cp .env.example .env
-# Edit .env with your API keys:
-#   GEMINI_API_KEY=...
-#   ANTHROPIC_API_KEY=...
-#   JWT_SECRET=...
-#   ADMIN_USERNAME=admin
-#   ADMIN_PASSWORD=...
+# Required: GOOGLE_AI_API_KEY, ANTHROPIC_API_KEY, JWT_SECRET, ADMIN_USERNAME, ADMIN_PASSWORD
 
-# Run database migrations
+# Database
 npx drizzle-kit push
 
-# Seed development data (optional)
-npm run seed
-
-# Start development server via pm2
-pm2 start ecosystem.config.cjs
-
-# Other pm2 commands
-pm2 stop messaging-engine
-pm2 restart messaging-engine
+# Run
+pm2 start ecosystem.config.cjs    # or: ./start.sh
 pm2 logs messaging-engine
-pm2 status
 
-# Run tests
-npm test              # unit tests
-npm run test:e2e      # end-to-end pipeline test (long-running)
+# Build admin UI
+cd admin && npm install && npm run build && cd ..
 
-# In a separate terminal, start the admin UI
-cd admin
-npm install
-npm run dev
+# Deploy (build + commit + restart)
+./deploy.sh
+
+# Tests
+npm test                           # unit tests (MODEL_PROFILE=test)
+npm run test:e2e                   # e2e tests (5min timeout)
 ```
 
-### Environment Variables
+### Key Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `PORT` | No (default: 3007) | API server port (nginx proxies from port 91) |
-| `DATABASE_URL` | No (default: ./data/messaging-engine.db) | SQLite database file path |
-| `GEMINI_API_KEY` | Yes | Google AI API key for Gemini models |
-| `ANTHROPIC_API_KEY` | Yes | Anthropic API key for Claude |
-| `JWT_SECRET` | Yes | Secret for JWT token signing |
+| `PORT` | No (3007) | API server port (nginx proxies 91 → 3007) |
+| `DATABASE_URL` | No (./data/messaging-engine.db) | SQLite database path |
+| `GOOGLE_AI_API_KEY` | Yes | Google AI API key |
+| `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
+| `JWT_SECRET` | Yes | JWT signing secret (must change in production) |
 | `ADMIN_USERNAME` | Yes | Default admin username |
 | `ADMIN_PASSWORD` | Yes | Default admin password |
-| `LOG_LEVEL` | No (default: info) | Logging level (debug, info, warn, error) |
-| `NODE_ENV` | No (default: development) | Environment (development, production) |
+| `MODEL_PROFILE` | No (production) | `'production'` or `'test'` |
+| `NODE_ENV` | No (development) | Environment mode |
 
 ## Important Conventions
 
 ### IDs
-Always use `generateId()` from `src/utils/id.ts` for primary keys. Never use auto-increment integers. IDs are 21-character nanoid strings stored as TEXT.
+`generateId()` from `src/utils/hash.ts` — 21-character nanoid strings. Never use auto-increment.
 
 ### Timestamps
-Always use `now()` from `src/utils/timestamp.ts` which returns `new Date().toISOString()`. All datetime columns are TEXT with ISO 8601 format. Never use Unix timestamps or Date objects in the database.
+`new Date().toISOString()` — All datetime columns are TEXT with ISO 8601 format.
 
-### JSON Columns
-Complex data (arrays, objects) is stored as JSON-serialized TEXT. Always use `safeJsonParse()` from `src/utils/json.ts` on read (handles null/undefined gracefully) and `JSON.stringify()` on write. Define TypeScript types for the JSON structure and cast on parse.
+### Quality Scoring
+Scores are on a 0–10 scale. Slop and vendor-speak are inverted (lower is better). Default thresholds: `slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6`.
 
-### Error Handling
-Use custom error classes from `src/utils/errors.ts`. The global error handler in `src/api/middleware/error.ts` catches all errors and returns consistent JSON responses. AI API errors should be retried using the retry utility before surfacing.
+### Product Name Enforcement
+Generation prompts include the product name (extracted from insights) to prevent the LLM from inventing product names.
 
-### API Response Format
-All API endpoints return JSON with consistent structure:
-```typescript
-// Success
-{ data: T, meta?: { page, limit, total } }
-
-// Error
-{ error: { code: string, message: string, details?: any } }
-```
-
-### Database Queries
-Always use Drizzle's query builder. Never write raw SQL. Use transactions for multi-table operations. Always include `updated_at: now()` when updating rows.
-
-### AI Prompts
-Store prompt templates as TypeScript template literal functions in the relevant `prompts/` directory. Prompts should be composable (system prompt + context sections). Always include anti-slop instructions in generation prompts. Always request structured JSON output for scoring operations.
+### No Cron
+There is no scheduler/cron in the application. All work is triggered by API requests. There is a unit test (`no-cron.test.ts`) that enforces this.

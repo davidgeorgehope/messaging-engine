@@ -1,248 +1,294 @@
-# Messaging Engine Architecture
+# ARCHITECTURE.md — System Architecture
 
-## System Overview
+## Overview
 
-The PMM Messaging Engine is an automated system that converts practitioner pain points discovered from community sources into scored, traceable messaging assets. It exists to solve a core product marketing problem: messaging that sounds like it was written by marketers rather than informed by real practitioner frustrations tends to fall flat. This engine closes the gap by grounding every messaging asset in actual community evidence, running it through competitive context, generating it with AI, and stress-testing it for quality before human review.
-
-The system forks architectural patterns from two existing projects:
-
-- **o11y.tips** (`/root/o11y.tips`) — Provides the discovery pipeline pattern (community source ingestion, scoring, scheduling), the quality pipeline pattern (multi-dimension scoring, quality gates), and the admin UI scaffold (Vite + React + Tailwind dashboard).
-- **compintels** (`/root/compintels`) — Provides the competitive research pattern via Gemini Deep Research (async job submission, polling, structured result parsing).
-
-By combining these two proven patterns with Gemini Pro-powered messaging generation and a voice profile system, the engine produces messaging assets that are evidence-based, competitively informed, voice-consistent, and quality-scored.
-
-## Data Flow
+The PMM Messaging Engine is a full-stack application that generates, scores, and refines marketing messaging assets from product documentation and community evidence. Users create workspace sessions, select asset types and voice profiles, choose a generation pipeline, and iteratively refine the output through actions and chat.
 
 ```
-+-------------------+     +-------------------+     +--------------------+
-|  Community        |     |  Product          |     |  Competitive       |
-|  Sources          |     |  Documents        |     |  Research          |
-|  (Reddit, HN,    |     |  (PDFs, docs,     |     |  (Gemini Deep      |
-|   Discourse,      |     |   release notes)  |     |   Research)        |
-|   StackOverflow,  |     |                   |     |                    |
-|   Discord)        |     +--------+----------+     +---------+----------+
-+--------+----------+              |                          |
-         |                         |                          |
-         v                         |                          |
-+--------+----------+              |                          |
-|  Stage 1:         |              |                          |
-|  Discovery        |              |                          |
-|  - Source polling  |              |                          |
-|  - Pain scoring   |              |                          |
-|  - Quote extract  |              |                          |
-+--------+----------+              |                          |
-         |                         |                          |
-         v                         v                          v
-+--------+---------+------+--------+-----------+--------------+----------+
-|                                                                        |
-|                    Stage 4: Messaging Generation                       |
-|                    (Gemini Pro, default; Claude opt-in)                    |
-|                                                                        |
-|   Pain Points + Product Context + Competitive Intel + Voice Profile    |
-|                           |                                            |
-|                           v                                            |
-|                  Generated Messaging Assets                            |
-|   (battlecard, talk track, launch messaging, social hook,              |
-|    one-pager, email copy)                                              |
-|                                                                        |
-+----------------------------+-------------------------------------------+
-                             |
-                             v
-+----------------------------+-------------------------------------------+
-|                                                                        |
-|                    Stage 5: Scoring & Stress Testing                   |
-|                    (Gemini Flash + Gemini Pro)                          |
-|                                                                        |
-|   5 Dimensions:                                                        |
-|   [Slop] [Vendor-Speak] [Authenticity] [Specificity] [Persona-Fit]    |
-|                           |                                            |
-|                    Quality Gate Check                                   |
-|                           |                                            |
-|              +------------+------------+                               |
-|              |                         |                               |
-|           PASS                       FAIL                              |
-|              |                         |                               |
-|              v                         v                               |
-|         Ready for              Flagged / Sent                          |
-|         Review                 for Regeneration                        |
-|                                                                        |
-+----------------------------+-------------------------------------------+
-                             |
-                             v
-+----------------------------+-------------------------------------------+
-|                                                                        |
-|                    Stage 6: Admin Review                               |
-|                    (React Admin UI)                                    |
-|                                                                        |
-|              +------------+------------+                               |
-|              |            |            |                               |
-|           Approve      Edit &       Reject                             |
-|              |         Rescore         |                               |
-|              v            |            v                               |
-|         Approved          |       Archived                             |
-|         Assets       Re-enter                                          |
-|              |        Pipeline                                         |
-|              v                                                         |
-|         Published Messaging Assets                                     |
-|         (with full traceability chain)                                  |
-|                                                                        |
-+------------------------------------------------------------------------+
+┌─────────────────────────────────────────────────────────────┐
+│                     React Admin/Workspace UI                │
+│        (Vite + React Router + Tailwind CSS)                 │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ HTTP/SSE (port 91 → nginx → 3007)
+┌──────────────────────────▼──────────────────────────────────┐
+│                      Hono API Server                         │
+│  ┌──────────┐  ┌───────────┐  ┌──────────────┐             │
+│  │  Public   │  │   Admin   │  │  Workspace   │             │
+│  │  Routes   │  │  Routes   │  │   Routes     │             │
+│  └────┬─────┘  └─────┬─────┘  └──────┬───────┘             │
+│       │               │               │                      │
+│  ┌────▼───────────────▼───────────────▼───────────────────┐ │
+│  │                  Service Layer                          │ │
+│  │  ┌──────────┐  ┌──────────┐  ┌───────────┐            │ │
+│  │  │ Pipeline │  │Workspace │  │  Quality   │            │ │
+│  │  │ Engine   │  │  System  │  │  Scoring   │            │ │
+│  │  └────┬─────┘  └────┬─────┘  └─────┬─────┘            │ │
+│  │       │              │              │                   │ │
+│  │  ┌────▼──────────────▼──────────────▼────────────────┐ │ │
+│  │  │                AI Client Layer                     │ │ │
+│  │  │  Gemini Flash │ Gemini Pro │ Deep Research │ Claude│ │ │
+│  │  │  Call Logger │ Call Context (AsyncLocalStorage)    │ │ │
+│  │  └──────────────────────┬────────────────────────────┘ │ │
+│  └─────────────────────────┼──────────────────────────────┘ │
+└────────────────────────────┼────────────────────────────────┘
+                             │
+┌────────────────────────────▼────────────────────────────────┐
+│           SQLite (better-sqlite3 + Drizzle ORM)             │
+│                    20 tables, single file                    │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Component Descriptions
+## Component Architecture
 
-### Service Layers
+### 1. API Layer (`src/api/`)
 
-#### 1. Discovery Service (`src/services/discovery/`)
+**Framework**: Hono with CORS, body-limit (50MB for PDFs), and request logging.
 
-Forked from the o11y.tips discovery pipeline. Responsible for polling community sources on configurable schedules, extracting posts and comments that contain practitioner pain points, scoring them for relevance and severity, and extracting verbatim quotes for traceability. Each source has its own adapter (Reddit, Hacker News, Discourse, StackOverflow, Discord) with normalized output.
+**Route groups**:
+- **Public** (`/api/`) — Upload, extract, voices, asset-types, history, auth. Rate-limited per endpoint.
+- **Admin** (`/api/admin/`) — Documents, voices, settings, stats. JWT auth required.
+- **Workspace** (`/api/workspace/`) — Sessions, versions, actions, chat. JWT auth required (user-scoped).
 
-#### 2. Product Context Service (`src/services/product/`)
+**Auth**: JWT via jose library. Two auth middlewares:
+- `adminAuth` — for admin routes (accepts env var credentials or DB users with admin role)
+- `workspaceAuth` — for workspace routes (accepts any authenticated user)
 
-Manages uploaded product documents (PDFs, markdown, release notes, changelogs). These documents provide the factual grounding for messaging generation. The service handles upload, parsing, chunking, and retrieval so that the generation stage can pull relevant product facts for each pain point.
+Login falls through: DB users table first, then env var admin credentials as fallback.
 
-#### 3. Competitive Research Service (`src/services/research/`)
+### 2. Pipeline Engine (`src/services/pipeline/`)
 
-Adapted from the compintels project. Submits pain-point-focused research queries to Gemini Deep Research, polls for completion (async pattern), and parses structured results. The research is scoped to how competitors address (or fail to address) each discovered pain point, providing the competitive angle for messaging.
+The pipeline engine is the core generation system. All 5 pipelines share common primitives from the orchestrator.
 
-#### 4. Messaging Generation Service (`src/services/generation/`)
+#### Shared Primitives (`orchestrator.ts`)
 
-The core generation engine. Takes a pain point, product context, competitive research, and a voice profile, then uses Gemini Pro (default) or Claude (if selected by the user) to generate messaging assets. Supports multiple asset types (battlecard, talk track, launch messaging, social hook, one-pager, email copy). Each generation job is tracked with full input/output lineage for traceability.
+| Function | Purpose |
+|----------|---------|
+| `loadJobInputs(jobId)` | Load job configuration (product docs, voices, asset types, pipeline) |
+| `generateContent(prompt, options, model?)` | AI dispatch — routes to Gemini or Claude |
+| `generateAndScore(prompt, system, model, context, thresholds, assetType)` | Generate + score in one call |
+| `refinementLoop(content, context, thresholds, voice, assetType, system, model, maxIter, productName)` | Iterative: deslop → refine → score until gates pass or plateau |
+| `storeVariant(jobId, assetType, voice, content, scores, passesGates, ...)` | Store asset + variant + traceability records |
+| `emitPipelineStep(jobId, step, status, data?)` | Record pipeline step events to job |
+| `updateJobProgress(jobId, fields)` | Update job progress/status |
+| `finalizeJob(jobId, researchAvailable, researchLength)` | Mark job complete |
 
-#### 5. Quality Pipeline Service (`src/services/quality/`)
+#### Pipeline Dispatch
 
-Forked from the o11y.tips quality pipeline. Runs generated assets through 5 scoring dimensions using Gemini Flash (fast, cheap scoring) and Gemini Pro (slop detection via "deslop" rewrites). Each dimension produces a 0-100 score. Quality gates are configured per voice profile — e.g., a developer-focused voice might have a higher authenticity threshold than a marketing voice.
+```typescript
+PIPELINE_RUNNERS = {
+  'straight-through': runStraightThroughPipeline,
+  'standard':         runStandardPipeline,
+  'outside-in':       runOutsideInPipeline,
+  'adversarial':      runAdversarialPipeline,
+  'multi-perspective': runMultiPerspectivePipeline,
+};
+```
 
-#### 6. Scheduling Service (`src/services/scheduler/`)
+`runPublicGenerationJob(jobId)` loads inputs, resolves session for LLM context, wraps execution in `withLLMContext()`, and dispatches to the appropriate runner.
 
-Uses node-cron to orchestrate recurring tasks: source discovery polling, research job polling, batch generation runs, and quality rescoring. Schedules are configurable per source and per pipeline stage via the admin UI.
+#### Pipeline Details
 
-#### 7. Auth Service (`src/services/auth/`)
+**Standard Pipeline**:
+1. Deep PoV extraction (Gemini Pro)
+2. Community deep research (Deep Research agent) + competitive research
+3. PoV-first prompt generation per asset type × voice
+4. Refinement loop (up to 3 iterations)
+5. Store variants with traceability
 
-JWT-based authentication for the admin UI and API endpoints. Supports user management and role-based access for the review/approve workflow.
+**Outside-In Pipeline**:
+1. Extract insights (Gemini Flash)
+2. Community deep research with **3 full retries** if no evidence
+3. **Fails hard** if no community evidence after retries (no fallback)
+4. Pain-grounded first draft per asset type × voice
+5. Competitive research + enrichment
+6. Refinement loop (product doc layering **removed** — keeps practitioner voice pure)
+7. Store variants
 
-### Infrastructure Layers
+**Adversarial Pipeline**:
+1. Extract insights + community/competitive research
+2. Generate initial draft per asset type × voice
+3. **2 rounds of attack/defend**: hostile practitioner critique → rewrite to survive objections
+4. Refinement loop
+5. Store variants
 
-#### API Layer (`src/api/`)
+**Multi-Perspective Pipeline**:
+1. Extract insights + community/competitive research
+2. Generate initial draft per asset type × voice
+3. 3 parallel perspective rewrites: empathy, competitive, thought leadership
+4. Synthesize best elements from all 3
+5. Score all 4 candidates, keep the highest
+6. Refinement loop
+7. Store variants
 
-Hono-based REST API. Routes are organized by domain: `/api/discovery`, `/api/research`, `/api/generation`, `/api/quality`, `/api/assets`, `/api/admin`. All endpoints return JSON and use consistent error handling middleware.
+**Straight-Through Pipeline**:
+1. Extract insights
+2. Score existing messaging content (no generation)
+3. Store scored results
 
-#### Database Layer (`src/db/`)
+#### Evidence & Research (`evidence.ts`)
 
-SQLite database managed through Drizzle ORM. The schema consists of 14 tables covering the full pipeline lifecycle. Drizzle provides type-safe queries, migrations, and schema definition in TypeScript. SQLite was chosen for simplicity and single-file deployment — the same pattern used successfully in o11y.tips.
+- `runCommunityDeepResearch(insights, prompt)` — Deep Research for practitioner quotes, community pain points
+- `runCompetitiveResearch(insights, prompt)` — Deep Research for competitive analysis
+- Evidence levels: `strong` (≥3 sources from ≥2 types), `partial` (≥1 source or grounded search), `product-only`
+- Grounded search retries 5x on empty results; community research retries 3x
 
-#### AI Client Layer (`src/ai/`)
+#### Prompts (`prompts.ts`)
 
-Abstraction layer for multi-model AI usage. Each model is wrapped in a client with retry logic, rate limiting, and structured output parsing:
+- 8 asset types with templates, temperatures, and labels
+- `buildSystemPrompt()` — voice guide + asset type instructions + evidence level + banned words + product name
+- `buildUserPrompt()` — existing messaging + focus + research + template + insights
+- `buildPainFirstPrompt()` — practitioner context first (outside-in)
+- `buildPoVFirstPrompt()` — PoV context first (standard)
+- `buildRefinementPrompt()` — score-driven improvement instructions
+- `generateBannedWords()` — LLM-generated per-voice banned words (3x retry with backoff)
 
-- `gemini-flash.ts` — Fast scoring operations
-- `gemini-pro.ts` — Default messaging generation, slop detection, and deslop rewrites
-- `gemini-deep-research.ts` — Competitive research (async)
-- `claude.ts` — Messaging generation (opt-in alternative to Gemini Pro)
+### 3. Workspace System (`src/services/workspace/`)
 
-## Multi-Model AI Strategy
+The workspace provides session-based asset management with versioning, chat, and background actions.
 
-The engine uses a deliberate multi-model strategy, selecting each model for its strengths:
+#### Sessions (`sessions.ts`)
 
-| Model | Purpose | Why This Model |
-|-------|---------|----------------|
-| **Gemini Flash** | Pain point scoring, quality dimension scoring | Fast, cheap, good at structured numeric output. Ideal for high-volume scoring where latency matters. |
-| **Gemini Deep Research** | Competitive research | Unique capability — performs multi-step web research with source citations. No other model offers this as a built-in feature. |
-| **Gemini Pro** | Default messaging generation, slop detection, deslop rewrites | Primary generation model. Strong at nuanced writing, voice-consistent copy, and language quality assessment. Also handles deslop rewrites. |
-| **Claude** | Opt-in messaging generation (user-selectable per session) | Alternative generator available when explicitly selected in the UI. Superior at certain long-form writing tasks. |
+- `createSession(userId, data)` — Create with pain point, voice(s), asset types, pipeline, product context
+- `startSessionGeneration(sessionId)` — Build generation job, fire pipeline in background
+- Auto-naming: placeholder from input → refined by `nameSessionFromInsights()` via Gemini Flash
+- Multi-voice: `voiceProfileIds` array in session metadata
 
-This strategy optimizes for cost (Flash for volume), capability (Deep Research for web research), and quality/generation (Pro as the default generator and language assessor, with Claude available as an opt-in alternative).
+#### Versions (`versions.ts`)
 
-## Database Overview
+- `createInitialVersions(sessionId, jobId)` — Copy generation results as v1
+- `createEditVersion(sessionId, assetType, content)` — User inline edit → score → new version
+- `activateVersion(sessionId, versionId)` — Switch active version (deactivates others)
+- Every version is scored and stores `isActive` flag
 
-The database consists of 14 tables organized around the pipeline lifecycle. See `DATABASE.md` for the complete schema.
+#### Actions (`actions.ts`)
 
-Core table groups:
+7 workspace actions, all wrapped in `withLLMContext()`:
 
-- **Configuration**: `messaging_priorities`, `discovery_schedules`, `settings`, `voice_profiles`
-- **Discovery**: `discovered_pain_points`
-- **Product Context**: `product_documents`
-- **Research**: `competitive_research`
-- **Generation**: `generation_jobs`, `messaging_assets`, `asset_variants`
-- **Quality**: `persona_critics`, `persona_scores`
-- **Traceability**: `asset_traceability`, `messaging_gaps`
+| Action | Description |
+|--------|-------------|
+| `runDeslopAction` | Analyze slop patterns → deslop → score |
+| `runRegenerateAction` | Full regeneration with voice, template, research, refinement loop |
+| `runVoiceChangeAction` | Rewrite in a different voice profile |
+| `runAdversarialLoopAction` | 1–3 iterations of fix/elevate mode (custom logic, not pipeline refinementLoop) |
+| `runCompetitiveDeepDiveAction` | Deep Research competitive analysis → enrichment |
+| `runCommunityCheckAction` | Deep Research community evidence → rewrite with practitioner language |
+| `runMultiPerspectiveAction` | 3 perspective rewrites → synthesize → score all 4, keep best |
 
-All tables use `TEXT` primary keys generated by `generateId()` (nanoid-style), ISO 8601 timestamps for all datetime fields, and `TEXT` columns with JSON serialization for complex nested data.
+#### Action Runner (`action-runner.ts`)
 
-## Admin UI Overview
+- `runActionInBackground(sessionId, assetType, actionName, actionFn)` — Fire-and-forget with `action_jobs` tracking
+- `getActionJobStatus(jobId)` — Poll progress
 
-The admin UI is a Vite + React + Tailwind application with 10 pages, accessed via React Router:
+#### Chat (`chat-context.ts`)
 
-1. **Dashboard** — Pipeline health, asset counts by status, recent activity, quality score distributions.
-2. **Discovery** — View discovered pain points, filter by source/severity/status, manage discovery schedules.
-3. **Pain Points** — Detailed pain point view with extracted quotes, related research, linked assets.
-4. **Product Documents** — Upload and manage product documents, view parsed content, tag by product area.
-5. **Research** — View competitive research results, trigger new research jobs, see research status.
-6. **Generation** — Trigger generation jobs, select pain points and voice profiles, view generation queue.
-7. **Assets** — Browse all messaging assets, filter by type/status/score, bulk actions.
-8. **Asset Detail** — Single asset view with full traceability chain, scores, variants, approve/reject actions.
-9. **Voice Profiles** — Create and manage voice profiles, set quality gate thresholds, preview voice characteristics.
-10. **Settings** — System configuration, API keys, scheduler settings, user management.
+- `assembleChatContext(sessionId, assetType?)` — Builds system prompt + message history
+- System prompt includes: voice guide, anti-slop rules, product context, active version content, other asset summaries
+- 150K token budget, oldest-first trimming
+- Proposed content wrapped in `---PROPOSED---` delimiters for accept/reject
 
-## Voice Profile System
+### 4. Quality Scoring (`src/services/quality/`)
 
-Voice profiles are a core concept that govern how messaging is generated and scored. A voice profile defines:
+**Central scorer** (`score-content.ts`):
+- Runs all 5 scorers in parallel: slop, vendor-speak, authenticity, specificity, persona
+- Each scorer has fallback to score 5 on failure
+- `ScorerHealth` tracks which scorers succeeded/failed
+- `checkQualityGates(scores, thresholds)` — all dimensions must pass
+- `totalQualityScore(scores)` — composite score (inverts slop/vendor for comparison)
 
-- **Name and description** — e.g., "Developer Advocate", "Enterprise Sales", "Product Launch"
-- **Tone attributes** — Formality level, technical depth, empathy level, urgency
-- **Vocabulary rules** — Preferred terms, banned terms, jargon handling
-- **Quality gate thresholds** — Minimum scores per dimension that assets must meet for this voice
-- **Example snippets** — Reference text that exemplifies the desired voice
+**Slop Detector** (`slop-detector.ts`):
+- Pattern-based detection: hedging, transitions, fillers, fake enthusiasm, cliches
+- AI-powered analysis via Gemini
+- `deslop()` function rewrites content to remove detected patterns
 
-During generation, the voice profile is injected into the generation prompt so the output matches the desired tone and vocabulary. During scoring, the quality gates from the voice profile determine whether an asset passes or needs revision. This allows the same pain point to produce different messaging for different audiences (e.g., a developer-focused battlecard vs. an executive-focused one-pager) with appropriate quality bars for each.
+**Grounding Validator** (`grounding-validator.ts`):
+- Detects fabricated claims not supported by evidence
+- Strips fabrications from generated content
 
-## Traceability System (Killer Feature)
+### 5. AI Client Layer (`src/services/ai/`)
 
-The traceability system is the defining feature of this engine. Every messaging asset maintains a complete, auditable chain back to its source evidence. The `asset_traceability` table records:
+**`clients.ts`** — Unified client layer:
+- `generateWithClaude(prompt, options)` — Claude API with rate limiting + retry
+- `generateWithGemini(prompt, options)` — Gemini with Flash/Pro routing + rate limiting + retry
+- `generateWithGeminiGroundedSearch(prompt, options)` — Gemini with Google Search tool (5x empty retry)
+- `generateJSON<T>(prompt, options)` — Gemini Pro JSON generation with parse retry + error feedback
+- `createDeepResearchInteraction(prompt)` — Async deep research submission
+- `pollInteractionUntilComplete(interactionId)` — Poll with configurable interval/timeout
 
-- **Source pain point** — The original community post/comment that surfaced the pain
-- **Extracted quotes** — Verbatim practitioner language that grounds the message
-- **Product documents used** — Which product facts informed the messaging
-- **Competitive research used** — Which competitive insights were incorporated
-- **Generation parameters** — The exact prompt, model, voice profile, and configuration used
-- **Quality scores** — All dimension scores and which quality gates were applied
-- **Edit history** — Any human edits made during review
+**Rate limiters**: Claude (10/min), Gemini Flash (60/min), Gemini Pro (15/min)
 
-This means any stakeholder can click on a messaging asset and trace it all the way back to a real practitioner saying a real thing in a real community. This transforms messaging from "the PMM team thinks X" to "practitioners are saying X, and here's the evidence." It also enables gap analysis: the `messaging_gaps` table tracks pain points that have been discovered but lack adequate messaging coverage, surfacing opportunities for new content.
+**`call-logger.ts`** — Fire-and-forget `logCall()` to `llm_calls` table  
+**`call-context.ts`** — `withLLMContext()` for automatic session/job/purpose threading via AsyncLocalStorage
 
-## Pipeline Architecture (Updated Feb 2025)
+### 6. Product Insights (`src/services/product/insights.ts`)
 
-### Pipeline Variants
-Four pipelines are available, all sharing a common refinement loop:
-- **Standard**: Research → Generate → Refine
-- **Outside-In**: Community pain → Draft → Enrich competitively → Layer product → Refine
-- **Adversarial**: Draft → 2 rounds of Attack/Defend → Refine
-- **Multi-Perspective**: 3 parallel angles → Synthesize → Refine
+- `extractInsights(productDocs)` — Gemini Flash extraction of domain, category, personas, capabilities, etc.
+- `extractDeepPoV(productDocs)` — Gemini Pro deep point-of-view extraction (used by Standard pipeline)
+- `buildFallbackInsights(productDocs)` — Deterministic fallback if extraction fails
+- Formatting functions: `formatInsightsForScoring()`, `formatInsightsForPrompt()`, `formatInsightsForDiscovery()`, `formatInsightsForResearch()`
 
-### Key Design Decisions
-- **Sequential DAG pattern**: Each pipeline step feeds the next. No `pickBestResult()` comparisons.
-- **Shared refinement loop**: Up to 3 iterations of score → deslop → refine → check plateau.
-- **Pipeline step events**: `emitPipelineStep()` writes progress to `generation_jobs.pipeline_steps` for live UI streaming.
-- **Split Research pipeline removed**: Was identical to Standard.
+## Data Flow: Session Generation
 
+```
+User creates session (POST /api/workspace/sessions)
+    │
+    ├── createSession() → sessions table
+    ├── autoNameSession() → placeholder name
+    ├── startSessionGeneration()
+    │       │
+    │       ├── Build product docs string from pain point + docs + context
+    │       ├── Create generation_jobs row
+    │       ├── Update session status → 'generating'
+    │       ├── Set MODEL_PROFILE env var
+    │       └── Fire runPublicGenerationJob() (async, not awaited)
+    │               │
+    │               ├── loadJobInputs() → voices, asset types, pipeline
+    │               ├── Resolve session for LLM context
+    │               ├── withLLMContext() wraps pipeline
+    │               └── PIPELINE_RUNNERS[pipeline](jobId, inputs)
+    │                       │
+    │                       ├── extractInsights() + nameSessionFromInsights()
+    │                       ├── runCommunityDeepResearch() + runCompetitiveResearch()
+    │                       ├── For each assetType × voice:
+    │                       │     ├── buildSystemPrompt() + buildUserPrompt()
+    │                       │     ├── generateContent()
+    │                       │     ├── refinementLoop() → deslop → refine → score
+    │                       │     └── storeVariant() → asset + variant + traceability
+    │                       └── finalizeJob()
+    │
+    └── On completion:
+            ├── Session status → 'completed'
+            └── createInitialVersions() → session_versions (v1)
+```
 
-## Standard vs Outside-In: Pipeline Philosophy
+## Deployment
 
-| Aspect | Standard Pipeline | Outside-In Pipeline |
-|--------|------------------|---------------------|
-| **Philosophy** | "Here is our story — validate it" | "What is the community saying — build from that" |
-| **Step 0** | Deep PoV Extraction (Gemini Pro) | Extract Insights (Gemini Flash) |
-| **Extraction** | Thesis, contrarian take, narrative arc, strongest claims | Capabilities, differentiators, pain points |
-| **Community Research** | Validation — confirms/challenges our PoV | Discovery — drives the narrative |
-| **Generation Prompt** | PoV-first: leads with thesis and narrative arc | Pain-first: leads with practitioner frustration |
-| **System Prompt** | "Lead with your point of view" | "Lead with the pain" |
-| **Content Voice** | Opinionated, defensible argument | Empathetic, practitioner-resonant |
-| **Best For** | Product launches, thought leadership, narratives | Battlecards, talk tracks, community-validated content |
+- **Server**: Hetzner VPS at 5.161.203.108
+- **Process**: PM2 via `ecosystem.config.cjs`
+- **Port**: 3007 (app) → 91 (nginx proxy)
+- **Deploy**: `./deploy.sh` (npm install → build → admin build → git commit → PM2 restart)
+- **Logs**: `data/dev-out.log`, `data/dev-error.log`
+- **Database**: `data/messaging-engine.db` (SQLite)
 
-### Standard Pipeline Flow
-1. **Deep PoV Extraction** (Gemini Pro) — Extract thesis, contrarian take, narrative arc, strongest claims with evidence
-2. **Community Validation** — Validate PoV against practitioner reality via Deep Research
-3. **Competitive Research** — Sharpen positioning informed by community
-4. **Generate from YOUR Narrative** — PoV-first prompt, community validates, competitive sharpens
-5. **Score & Refine** — Quality gates with up to 3 refinement iterations
-6. **Store** — Persist with traceability
+## Testing
+
+- **Framework**: Vitest with 5-minute timeout per test
+- **Pool**: forks (single fork — SQLite isn't thread-safe)
+- **Model profile**: Tests run with `MODEL_PROFILE=test` (all Gemini 2.5 Flash)
+
+### Test Categories
+
+**E2E** (`tests/e2e/`):
+- `pipeline.test.ts` — Single pipeline end-to-end
+- `all-pipelines.test.ts` — All 5 pipelines
+- `community-evidence.test.ts` — Evidence grounding verification
+- `spirit-scoring.ts` — LLM-based spirit validation helper
+
+**Unit** (`tests/unit/`):
+- `architecture/` — model-profile-guard, no-cron
+- `auth/` — authentication tests
+- `product/` — insights extraction
+- `quality/` — gates, score-content, slop-detector, product-filter
+- `workspace/` — versions, chat-context, naming, multi-voice, version-activation, adversarial-loop, go-outside-integrity, actions-integrity
+
+**Integration** (`tests/integration/`):
+- `naming-gemini.test.ts` — Session naming with real Gemini API

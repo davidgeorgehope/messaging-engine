@@ -1,401 +1,314 @@
-# Messaging Engine Pipeline
+# PIPELINE.md — Generation Pipeline Reference
 
 ## Overview
 
-The pipeline consists of 6 stages that transform raw community signals into reviewed, approved messaging assets. Each stage has defined inputs, outputs, AI models used, and quality checks. The stages can run independently (a pain point does not need to wait for research before generation can begin) but produce the best results when the full chain is populated.
+The messaging engine has **5 generation pipelines**, each with different strategies for producing messaging assets. All pipelines share common primitives from `src/services/pipeline/orchestrator.ts` and produce the same output format: scored messaging assets stored with full traceability.
 
----
+## Pipeline Selection
 
-## Stage 1: Discovery
+Pipelines are selected per session via the `pipeline` field. Default: `'outside-in'`.
 
-**Forked from**: o11y.tips discovery pipeline
+| Pipeline | Slug | Best For | Key Characteristic |
+|----------|------|----------|-------------------|
+| Standard | `standard` | General messaging from product docs | Deep PoV extraction → research → generation |
+| Outside-In | `outside-in` | Practitioner-authentic messaging | Community-first; **fails if no evidence** |
+| Adversarial | `adversarial` | Battle-tested messaging | 2 rounds of hostile critique + defense |
+| Multi-Perspective | `multi-perspective` | Well-rounded messaging | 3 angles synthesized into best version |
+| Straight-Through | `straight-through` | Scoring existing content | No generation — score only |
 
-### Purpose
+## Shared Pipeline Infrastructure
 
-Poll community sources on configurable schedules, identify practitioner pain points, score them for severity and relevance, and extract verbatim quotes for downstream traceability.
+### Orchestrator (`orchestrator.ts`)
 
-### Input
-
-- Configured discovery schedules (source type, source config, cron expression)
-- Messaging priorities (keywords, target personas) for relevance matching
-- Community source APIs (Reddit, Hacker News, Discourse, StackOverflow, Discord)
-
-### Process
-
-1. **Source Polling**: The scheduler triggers each discovery schedule according to its cron expression. The source adapter for the given platform (e.g., Reddit adapter) calls the platform API and retrieves new posts/comments since `last_run_at`.
-
-2. **Content Filtering**: Raw posts are filtered for minimum length, language (English), and basic relevance heuristics (keyword matching against messaging priority keywords). This is a cheap pre-filter to avoid burning AI tokens on irrelevant content.
-
-3. **Pain Point Extraction**: Posts that pass the pre-filter are sent to Gemini Flash with a structured prompt that asks:
-   - Is this post expressing a pain point related to [product area]?
-   - What is the core pain being described?
-   - Extract up to 3 verbatim quotes that best capture the pain.
-   - Categorize the pain (complexity, cost, reliability, performance, tooling, etc.).
-   - Estimate frequency: isolated, recurring, or widespread.
-
-4. **Scoring**: Each extracted pain point is scored on two dimensions by Gemini Flash:
-   - **Severity** (0-100): How painful is this for the practitioner? A minor annoyance scores low; a blocking production issue scores high.
-   - **Relevance** (0-100): How relevant is this to our product's positioning? A pain we can directly address scores high; a tangential pain scores low.
-
-5. **Deduplication**: New pain points are compared against existing ones (by source URL and semantic similarity) to avoid duplicates. Near-duplicates are linked and the frequency indicator is updated.
-
-6. **Storage**: Validated pain points are stored in `discovered_pain_points` with all extracted metadata, quotes, and scores.
-
-### Output
-
-- `discovered_pain_points` rows with status `new`
-- Each row includes: extracted pain summary, verbatim quotes, severity score, relevance score, pain category, frequency indicator
-
-### Model Used
-
-- **Gemini Flash** for extraction, scoring, and categorization
-
-### Quality Checks
-
-- Minimum severity threshold (configurable, default 30) — pain points below this are auto-archived
-- Minimum relevance threshold (configurable, default 40) — irrelevant content is auto-archived
-- Deduplication check against existing pain points
-- Source URL uniqueness constraint
-
----
-
-## Stage 2: Product Context
-
-### Purpose
-
-Upload, parse, and manage product documents that provide factual grounding for messaging generation. Without product context, generated messaging risks being generic or inaccurate.
-
-### Input
-
-- Product documents uploaded via the admin UI (PDF, markdown, text, HTML)
-- Document metadata: name, product area, document type, version
-
-### Process
-
-1. **Upload & Storage**: Documents are uploaded via the admin UI, stored on disk, and registered in the `product_documents` table.
-
-2. **Parsing**: Each document is parsed based on its file type:
-   - PDF: Text extraction via pdf-parse
-   - Markdown/HTML: Direct text extraction with formatting preserved
-   - Plain text: Stored as-is
-
-3. **Chunking**: Parsed content is split into overlapping chunks (default 1000 tokens with 200 token overlap) for retrieval. Chunks are stored as a JSON array in the `chunks` column.
-
-4. **Tagging**: Documents are tagged by product area and document type for filtered retrieval during generation.
-
-5. **Retrieval**: During generation (Stage 4), the system retrieves relevant chunks by matching the pain point's category and keywords against document product areas and content. This is a keyword-based retrieval (not vector search) to keep the system simple and dependency-light.
-
-### Output
-
-- `product_documents` rows with parsed content and chunks
-- Chunks available for retrieval during generation
-
-### Model Used
-
-- None (parsing and chunking are rule-based)
-
-### Quality Checks
-
-- Parse success validation (non-empty parsed content)
-- Chunk size validation
-- Duplicate document detection (by file hash)
-
----
-
-## Stage 3: Competitive Research
-
-**Adapted from**: compintels competitive research pipeline
-
-### Purpose
-
-For each high-priority pain point (or messaging priority), conduct automated competitive research using Gemini Deep Research to understand how competitors address (or fail to address) the same pain. This competitive context makes generated messaging sharper and more differentiated.
-
-### Input
-
-- Discovered pain points (typically those with severity >= 60 and relevance >= 60)
-- Messaging priorities
-- Competitor names (configured in settings)
-
-### Process
-
-1. **Query Construction**: A research query is assembled from the pain point's extracted pain, category, and related messaging priority keywords. The query is structured as: "How do [competitor names] address [pain point description]? What are their strengths, weaknesses, and gaps in addressing this problem for [target persona]?"
-
-2. **Job Submission**: The query is submitted to the Gemini Deep Research API. This is an asynchronous operation — the API returns a job ID immediately.
-
-3. **Polling**: The scheduler polls the Gemini Deep Research API for job completion. Research jobs can take 1-5 minutes. Polling occurs every 30 seconds. After 10 minutes, the job is marked as `expired`.
-
-4. **Result Parsing**: When complete, the raw research response is parsed into structured findings:
-   - `competitor_positioning`: For each competitor, how they position against this pain
-   - `gaps_identified`: Competitive gaps where no competitor addresses the pain well
-   - `sources_cited`: URLs of sources the research referenced
-   - `parsed_findings`: Structured summary of key findings
-
-5. **Storage**: Results are stored in `competitive_research` with all structured and raw data.
-
-### Output
-
-- `competitive_research` rows with status `completed`
-- Structured competitive positioning, gaps, and citations
-- Available for injection into generation prompts
-
-### Model Used
-
-- **Gemini Deep Research** for web-scale competitive research
-
-### Quality Checks
-
-- Research job completion within timeout (10 minutes)
-- Minimum number of sources cited (at least 3)
-- Parsed findings non-empty validation
-- Competitor name matching validation (research actually discusses named competitors)
-
----
-
-## Stage 4: Messaging Generation (Pipeline Variants)
-
-### Purpose
-
-The core generation stage. Takes product docs (or pain points), combines with research and voice profiles, and generates messaging through one of four pipeline variants. All pipelines end with a shared **refinement loop** that iteratively improves content until quality gates pass.
-
-### Available Pipelines
-
-#### Standard Pipeline
-Sequential DAG: Extract Insights → Research (community + competitive, parallel) → Generate → Refinement Loop → Store
-
-The default pipeline. Extracts product insights, runs community deep research and competitive research in parallel, generates content, then runs the shared refinement loop (up to 3 iterations) to meet quality gates.
-
-#### Outside-In Pipeline
-Sequential DAG: Extract Insights → Community Research → Pain-Grounded Draft → Competitive Research → Enrich with Competitive Intel → Layer Product Specifics → Refinement Loop → Store
-
-Starts from pure practitioner pain. Generates a first draft grounded entirely in community evidence, then sequentially enriches it with competitive positioning and product specifics. Each step feeds the next — no "pick best" comparisons. Falls back to Standard if no community evidence is found.
-
-#### Adversarial Pipeline
-Sequential DAG: Extract Insights → Research (parallel) → Generate Draft → Attack Round 1 → Defend Round 1 → Attack Round 2 → Defend Round 2 → Refinement Loop → Store
-
-Generates an initial draft, then puts it through two rounds of adversarial sparring. A hostile skeptical practitioner critic (Gemini Pro) attacks the content, then the defender rewrites to survive every objection. The defended version after 2 rounds IS the output — no comparison against the initial draft.
-
-#### Multi-Perspective Pipeline
-Sequential DAG: Extract Insights → Research (parallel) → Generate 3 Perspectives (parallel) → Synthesize → Refinement Loop → Store
-
-Generates three parallel perspectives (Practitioner Empathy, Competitive Positioning, Thought Leadership), then synthesizes the strongest elements into a single cohesive draft. The synthesized version IS the output — individual perspectives are not scored or compared.
-
-### Shared Refinement Loop
-
-All pipelines call `refinementLoop()` after their core generation logic:
-
-1. Score the current content against quality gates
-2. If gates pass, return immediately
-3. If slop score exceeds threshold, run deslop pass
-4. Build a refinement prompt targeting the specific failing dimensions
-5. Generate refined version
-6. If refined version scores lower (plateau), stop and keep current
-7. Otherwise, update content and repeat (up to 3 iterations)
-
-This replaces the previous one-shot refine approach and the `pickBestResult()` pattern.
-
-### Pipeline Step Events
-
-Each pipeline emits step events via `emitPipelineStep()` for live UI streaming. Steps include: `extract-insights`, `research`, `generate`, `refine`, plus pipeline-specific steps like `pain-draft`, `attack-r1`, `defend-r1`, `synthesize`, etc. Events are stored in the `pipeline_steps` column of `generation_jobs`.
-
-### Removed
-
-- **Split Research Pipeline**: Removed — identical to Standard pipeline (both already run community research first, then competitive research sequentially).
-- **`pickBestResult()` pattern**: Removed from all pipelines. Each pipeline now follows a sequential DAG where each step feeds the next.
-
-
----
-
-## Stage 5: Scoring & Stress Testing
-
-**Forked from**: o11y.tips quality pipeline
-
-### Purpose
-
-Score each generated messaging asset across 5 quality dimensions using AI persona critics. Apply quality gates from the voice profile to determine pass/fail. Assets that fail are flagged for regeneration or human intervention.
-
-### Input
-
-- `messaging_assets` with status `draft`
-- `persona_critics` (configured critic personas)
-- `voice_profiles` quality gate thresholds
-
-### Process
-
-1. **Critic Assignment**: Each asset is evaluated by all active persona critics. Each critic scores the asset across all 5 dimensions.
-
-2. **Scoring Dimensions**:
-
-   | Dimension | What It Measures | High Score Means | Low Score Means |
-   |-----------|-----------------|------------------|-----------------|
-   | **Slop** (inverted) | Presence of AI-typical clichés, filler, and generic language | Clean, specific language free of AI patterns | Full of "leverage", "unlock", "game-changer", "comprehensive solution" |
-   | **Vendor-Speak** (inverted) | Degree of self-congratulatory vendor language | Practitioner-focused, problem-centric | "Our industry-leading platform delivers unmatched..." |
-   | **Authenticity** | Whether it sounds like a real human wrote it for real humans | Genuine, conversational, credible | Corporate, stiff, overly polished |
-   | **Specificity** | Use of concrete details vs. vague generalities | Specific metrics, scenarios, examples | "Improve efficiency", "reduce costs", "streamline operations" |
-   | **Persona-Fit** | How well the messaging resonates with the target persona | Speaks directly to the persona's concerns, uses their language | Generic messaging that could target anyone |
-
-3. **Scoring Process**: For each (asset, critic, dimension) combination:
-   - The critic's scoring prompt is combined with the dimension-specific evaluation criteria
-   - The asset content and its traceability context (source pain points, quotes) are included
-   - Gemini Flash scores the dimension on a 0-100 scale with reasoning and suggestions
-   - Score, reasoning, and suggestions are stored in `persona_scores`
-
-4. **Slop Detection & Deslop** (Special Handling):
-   - If the slop dimension scores below 60 for any critic, the asset is flagged for "deslop"
-   - The deslop pass uses Gemini Pro (not Flash) for higher quality language revision
-   - Gemini Pro receives the asset, the slop scoring feedback, and instructions to remove AI-typical language while preserving meaning and voice
-   - The deslopped version is stored as an `asset_variants` row with `variant_type = 'deslop'`
-   - The deslopped version is re-scored
-
-5. **Overall Score Calculation**: The overall score for an asset is computed as a weighted average across all critics and dimensions:
-   ```
-   overall = sum(critic_weight * dimension_score) / sum(critic_weight) for all (critic, dimension) pairs
-   ```
-
-6. **Quality Gate Evaluation**: The voice profile's quality gates define minimum scores per dimension. An asset passes the quality gate only if its average score (across all critics) for each dimension meets or exceeds the threshold:
-   ```
-   passed = all(avg_score_per_dimension[d] >= voice_profile.quality_gates[d] for d in dimensions)
-   ```
-
-7. **Status Update**: Assets are updated to:
-   - `scored` with `passed_quality_gate = 1` if they pass
-   - `scored` with `passed_quality_gate = 0` if they fail (flagged in admin UI)
-
-### Output
-
-- `persona_scores` rows for every (asset, critic, dimension) combination
-- `messaging_assets` updated with `overall_score` and `passed_quality_gate`
-- `asset_variants` rows for any deslop rewrites
-- Assets transitioned to `scored` status
-
-### Models Used
-
-- **Gemini Flash** for dimension scoring (fast, cost-effective for high-volume scoring)
-- **Gemini Pro** for slop detection and deslop rewrites (higher quality language assessment)
-
-### Quality Checks
-
-- All 5 dimensions scored by all active critics (completeness check)
-- Score values within valid range (0-100)
-- Reasoning non-empty for every score
-- Quality gate thresholds validated against voice profile configuration
-- Deslop variant re-scored to confirm improvement
-
----
-
-## Stage 6: Review & Approve
-
-### Purpose
-
-Human review of scored messaging assets through the admin UI. PMM team members review, edit, approve, or reject assets. This is the final gate before messaging is considered ready for use.
-
-### Input
-
-- `messaging_assets` with status `scored`
-- Quality scores and pass/fail indicators
-- Traceability chains
-- Any deslop variants
-
-### Process
-
-1. **Review Queue**: The admin UI presents assets in a review queue, sortable by:
-   - Overall quality score (highest first for quick wins)
-   - Quality gate status (passed first, or failed first for triage)
-   - Asset type
-   - Messaging priority
-   - Creation date
-
-2. **Asset Review**: For each asset, the reviewer sees:
-   - Full asset content with formatting
-   - Overall score and per-dimension scores with visualizations
-   - Critic reasoning and suggestions for each dimension
-   - Quality gate pass/fail breakdown
-   - Full traceability chain (source pain points with links, quotes, product docs, research)
-   - Any variants (deslop, regenerations)
-   - Side-by-side comparison with variants
-
-3. **Review Actions**:
-   - **Approve**: Asset status changes to `approved`. It becomes a published messaging asset ready for use. Reviewer can add notes.
-   - **Edit & Rescore**: Reviewer edits the content. The edit is recorded in the traceability `edit_history`. The edited asset is sent back through Stage 5 for rescoring.
-   - **Regenerate**: Reviewer requests regeneration with optional parameter changes (different voice profile, additional context, specific instructions). Creates a new generation job and asset variant.
-   - **Reject**: Asset status changes to `rejected` with reviewer notes explaining why. Rejection reasons feed back into prompt improvement.
-   - **Archive**: Asset status changes to `archived`. Used for assets that are no longer relevant.
-
-4. **Bulk Actions**: The admin UI supports bulk approve/reject for efficiently processing large queues of high-scoring assets.
-
-5. **Gap Identification**: During review, if a reviewer notices a missing messaging angle, they can manually create a `messaging_gaps` entry to flag it for future generation.
-
-### Output
-
-- `messaging_assets` transitioned to `approved`, `rejected`, or `archived`
-- `asset_traceability.edit_history` updated for any edits
-- `messaging_gaps` entries for identified gaps
-- `asset_variants` for any regenerations
-
-### Model Used
-
-- None (human review stage)
-
-### Quality Checks
-
-- Reviewer notes required for rejections
-- Edit history recorded for all modifications
-- Approved assets must have complete traceability records
-- Status transitions are validated (cannot approve directly from `draft`, must be `scored` first)
-
----
-
-## Pipeline Summary
+All pipelines compose from these shared functions:
 
 ```
-Stage 1: Discovery
-  Model: Gemini Flash
-  Input:  Community Sources + Messaging Priorities
-  Output: Scored Pain Points with Quotes
-
-Stage 2: Product Context
-  Model: None (rule-based)
-  Input:  Uploaded Documents
-  Output: Parsed & Chunked Product Knowledge
-
-Stage 3: Competitive Research
-  Model: Gemini Deep Research
-  Input:  Pain Points + Competitor Names
-  Output: Structured Competitive Intelligence
-
-Stage 4: Messaging Generation
-  Model: Gemini Pro (default), Claude (opt-in)
-  Input:  Pain Points + Product Context + Research + Voice Profile
-  Output: Draft Messaging Assets with Traceability
-
-Stage 5: Scoring & Stress Testing
-  Model: Gemini Flash + Gemini Pro
-  Input:  Draft Assets + Persona Critics + Quality Gates
-  Output: Scored Assets with Pass/Fail Indicators
-
-Stage 6: Review & Approve
-  Model: None (human review)
-  Input:  Scored Assets + Traceability + Scores
-  Output: Approved Messaging Assets
+loadJobInputs(jobId) → JobInputs
+    ↓
+extractInsights(productDocs) → insights
+    ↓
+nameSessionFromInsights(jobId, insights, assetTypes)  [async, best-effort]
+    ↓
+For each assetType × voice:
+    buildSystemPrompt(voice, assetType, evidenceLevel, ...) → system prompt
+    buildUserPrompt(messaging, prompt, research, template, ...) → user prompt
+    generateContent(prompt, options, model) → AI response
+    refinementLoop(content, context, thresholds, voice, ...) → refined content + scores
+    storeVariant(jobId, assetType, voice, content, scores, ...) → DB records
+    ↓
+finalizeJob(jobId, researchAvailable, researchLength)
 ```
 
+### Evidence Bundle (`evidence.ts`)
 
-## Standard vs Outside-In: Pipeline Philosophy
+Community and competitive research shared across pipelines:
 
-| Aspect | Standard Pipeline | Outside-In Pipeline |
-|--------|------------------|---------------------|
-| **Philosophy** | "Here is our story — validate it" | "What is the community saying — build from that" |
-| **Step 0** | Deep PoV Extraction (Gemini Pro) | Extract Insights (Gemini Flash) |
-| **Extraction** | Thesis, contrarian take, narrative arc, strongest claims | Capabilities, differentiators, pain points |
-| **Community Research** | Validation — confirms/challenges our PoV | Discovery — drives the narrative |
-| **Generation Prompt** | PoV-first: leads with thesis and narrative arc | Pain-first: leads with practitioner frustration |
-| **System Prompt** | "Lead with your point of view" | "Lead with the pain" |
-| **Content Voice** | Opinionated, defensible argument | Empathetic, practitioner-resonant |
-| **Best For** | Product launches, thought leadership, narratives | Battlecards, talk tracks, community-validated content |
+- **`runCommunityDeepResearch(insights, prompt)`** — Gemini Deep Research for practitioner quotes and pain points from Reddit, HN, Stack Overflow, GitHub Issues, dev blogs
+- **`runCompetitiveResearch(insights, prompt)`** — Deep Research for competitor analysis
 
-### Standard Pipeline Flow
-1. **Deep PoV Extraction** (Gemini Pro) — Extract thesis, contrarian take, narrative arc, strongest claims with evidence
-2. **Community Validation** — Validate PoV against practitioner reality via Deep Research
-3. **Competitive Research** — Sharpen positioning informed by community
-4. **Generate from YOUR Narrative** — PoV-first prompt, community validates, competitive sharpens
-5. **Score & Refine** — Quality gates with up to 3 refinement iterations
-6. **Store** — Persist with traceability
+**Evidence Levels**:
+| Level | Criteria |
+|-------|---------|
+| `strong` | ≥3 source URLs from ≥2 unique host types |
+| `partial` | ≥1 source URL or grounded search text >100 chars |
+| `product-only` | No external evidence found |
+
+**Retry strategy**:
+- Grounded search: 5x retries on empty results (3s × attempt delay)
+- Community deep research: 3x full retries if evidence level is `product-only`
+
+### Prompt System (`prompts.ts`)
+
+**8 Asset Types** with per-type generation temperatures:
+
+| Asset Type | Temperature | Description |
+|------------|-------------|-------------|
+| `messaging_template` | 0.5 | Comprehensive positioning document (3000–5000 words) |
+| `battlecard` | 0.55 | Competitive battlecard |
+| `one_pager` | 0.6 | One-page summary |
+| `talk_track` | 0.65 | Sales talk track |
+| `launch_messaging` | 0.7 | Product launch messaging |
+| `email_copy` | 0.75 | Email campaign copy |
+| `narrative` | 0.8 | 3-variant storytelling narrative |
+| `social_hook` | 0.85 | Social media hooks |
+
+**4 Persona Angles** (used in prompt construction):
+- `practitioner-community` — Daily frustrations, peer language
+- `sales-enablement` — Whiteboard conversations, objection handling
+- `product-launch` — Bold headlines, before/after contrast
+- `field-marketing` — 30-second attention, scannable format
+
+**Banned Words System**:
+- `DEFAULT_BANNED_WORDS`: 13 static banned phrases (industry-leading, best-in-class, etc.)
+- `generateBannedWords(voice, insights)`: LLM-generated per-voice banned words
+  - Retries 3x with exponential backoff (2s × attempt)
+  - Falls back to defaults if all retries fail
+- Cached per `voiceId:domain` (in-memory, cleared on restart)
+
+### Quality Scoring
+
+All pipelines use `scoreContent()` from `src/services/quality/score-content.ts`:
+
+**5 parallel scorers** (0–10 scale):
+1. **Slop** — Pattern-based + AI analysis (lower is better)
+2. **Vendor-Speak** — Vendor language detection (lower is better)
+3. **Authenticity** — Human-likeness scoring (higher is better)
+4. **Specificity** — Concrete detail scoring (higher is better)
+5. **Persona-Fit** — Target audience resonance (higher is better)
+
+**Quality gates**: Per-voice-profile thresholds. Defaults: `slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6`
+
+**Refinement Loop** (`refinementLoop()`):
+1. Score content
+2. If ≥2 scorers failed → skip refinement, mark for manual review
+3. For up to N iterations (default 3):
+   - If slop exceeds threshold → deslop
+   - Build refinement prompt from failing scores
+   - Generate refined version
+   - Score new version
+   - If `totalQualityScore` didn't improve → stop (plateau)
+4. Return best content + scores
+
+### Storage
+
+`storeVariant()` creates 3 records per generation:
+1. **`messaging_assets`** — Primary asset with scores and evidence level
+2. **`asset_variants`** — Per-voice variant with full quality scores
+3. **`asset_traceability`** — Evidence chain: practitioner quotes + generation prompts
+
+Grounding validation runs before storage: `validateGrounding()` detects and strips fabricated claims.
+
+---
+
+## Pipeline 1: Standard
+
+**Slug**: `standard`  
+**File**: `src/services/pipeline/pipelines/standard.ts`
+
+The Standard pipeline uses deep PoV extraction and combines community + competitive research.
+
+### Steps
+
+1. **Deep PoV Extraction** (Gemini Pro)
+   - `extractDeepPoV(productDocs)` — comprehensive point-of-view analysis
+   - Falls back to `extractInsights()` if PoV extraction fails
+   - Names session from insights
+
+2. **Banned Words** — Pre-generated per voice in parallel
+
+3. **Community Deep Research** (Deep Research agent)
+   - 3x retries if no evidence
+   - Builds practitioner context
+
+4. **Competitive Research** (Deep Research agent)
+   - Includes community findings to inform analysis
+
+5. **Per Asset Type × Voice**:
+   - **PoV-first generation** — `buildPoVFirstPrompt()` with deep PoV context
+   - **Score** — Immediate quality scoring
+   - **Product doc layering** — Enrich with product documentation
+   - **Refinement loop** — Up to 3 iterations
+   - **Store variant**
+
+6. **Finalize job**
+
+---
+
+## Pipeline 2: Outside-In
+
+**Slug**: `outside-in`  
+**File**: `src/services/pipeline/pipelines/outside-in.ts`
+
+The Outside-In pipeline prioritizes practitioner authenticity. It starts with community evidence and **fails hard** if no real evidence is found.
+
+### Key Differences
+- **No fallback** — throws error if all community research retries exhausted
+- **No product doc layering** — keeps practitioner voice pure
+- Pain-grounded draft → competitive enrichment → refinement
+
+### Steps
+
+1. **Extract Insights** (Gemini Flash) + name session
+
+2. **Banned Words** — Pre-generated per voice
+
+3. **Community Deep Research** (Deep Research agent)
+   - 3x full retries if evidence level is `product-only`
+   - **Throws error** if still no evidence after retries
+
+4. **Per Asset Type × Voice**:
+   - **Pain-grounded draft** — `buildPainFirstPrompt()` with practitioner context
+   - **Competitive research** (per voice) — Deep Research
+   - **Competitive enrichment** — Weave competitive positioning without losing practitioner voice
+   - **Refinement loop** — Up to 3 iterations
+   - **Store variant**
+
+5. **Finalize job**
+
+---
+
+## Pipeline 3: Adversarial
+
+**Slug**: `adversarial`  
+**File**: `src/services/pipeline/pipelines/adversarial.ts`
+
+The Adversarial pipeline puts every draft through hostile critique to produce battle-hardened messaging.
+
+### Steps
+
+1. **Extract Insights** (Gemini Flash) + name session
+
+2. **Banned Words** — Pre-generated per voice
+
+3. **Community Deep Research** (Deep Research agent)
+
+4. **Competitive Research** (Deep Research agent)
+   - Enriched with community findings
+
+5. **Per Asset Type × Voice**:
+   - **Generate initial draft** — Standard generation with research context
+   - **Attack Round 1** (Gemini Pro) — Hostile senior practitioner tears apart the messaging:
+     - Unsubstantiated claims
+     - Vendor-speak detection
+     - Vague promises
+     - Reality check
+     - Missing objections
+     - Credibility gaps
+   - **Defend Round 1** (selected model) — Rewrite to survive every objection with product intelligence
+   - **Attack Round 2** — Second round of critique
+   - **Defend Round 2** — Second rewrite
+   - **Refinement loop** — Up to 3 iterations
+   - **Store variant**
+
+6. **Finalize job**
+
+---
+
+## Pipeline 4: Multi-Perspective
+
+**Slug**: `multi-perspective`  
+**File**: `src/services/pipeline/pipelines/multi-perspective.ts`
+
+The Multi-Perspective pipeline generates from 3 angles and synthesizes the best elements.
+
+### Steps
+
+1. **Extract Insights** (Gemini Flash) + name session
+
+2. **Banned Words** — Pre-generated per voice
+
+3. **Community Deep Research** (Deep Research agent)
+
+4. **Competitive Research** (Deep Research agent)
+
+5. **Per Asset Type × Voice**:
+   - **Generate initial draft** — Standard generation
+   - **3 parallel perspective rewrites**:
+     - **Empathy** — Lead with pain, practitioner language, product as afterthought
+     - **Competitive** — Lead with what alternatives fail at, specific workflow differences
+     - **Thought Leadership** — Lead with industry's broken promise, systemic framing
+   - **Synthesize** — Take strongest elements from all 3 into one cohesive piece
+   - **Score all 4** (3 perspectives + synthesis) — Keep highest `totalQualityScore`
+   - **Refinement loop** — Up to 3 iterations
+   - **Store variant**
+
+6. **Finalize job**
+
+---
+
+## Pipeline 5: Straight-Through
+
+**Slug**: `straight-through`  
+**File**: `src/services/pipeline/pipelines/straight-through.ts`
+
+The Straight-Through pipeline scores existing content without generating new content.
+
+### Prerequisites
+- Requires `existingMessaging` content in session metadata
+- Fails immediately if no existing messaging provided
+
+### Steps
+
+1. **Extract Insights** (Gemini Flash) + name session
+
+2. **Per Asset Type × Voice**:
+   - **Score existing content** — Full 5-dimension scoring
+   - **Store scored result** — as variant with scores
+
+3. **Finalize job** (no research)
+
+---
+
+## Workspace Actions
+
+Workspace actions are post-generation operations that create new versions within a session. They use the same underlying primitives but are triggered individually rather than as part of a pipeline run.
+
+| Action | Function | Description |
+|--------|----------|-------------|
+| Deslop | `runDeslopAction` | Analyze slop → deslop → score → new version |
+| Regenerate | `runRegenerateAction` | Full regeneration with voice + template + refinement |
+| Voice Change | `runVoiceChangeAction` | Rewrite in different voice profile |
+| Adversarial Loop | `runAdversarialLoopAction` | 1–3 iterations; fix mode (below thresholds) or elevation mode (above thresholds) |
+| Competitive Deep Dive | `runCompetitiveDeepDiveAction` | Deep Research → competitive enrichment |
+| Community Check | `runCommunityCheckAction` | Deep Research → practitioner language rewrite |
+| Multi-Perspective | `runMultiPerspectiveAction` | 3 angles → synthesize → score all 4, keep best |
+
+All actions are executed via `runActionInBackground()` which creates an `action_jobs` record for progress tracking.
+
+## Model Usage by Pipeline Step
+
+| Step | Model Task | Production Model |
+|------|-----------|-----------------|
+| Insight extraction | `flash` | gemini-3-flash-preview |
+| Deep PoV extraction | `pro` | gemini-3-pro-preview |
+| Session naming | `flash` | gemini-3-flash-preview |
+| Banned words generation | `flash` | gemini-3-flash-preview |
+| Community research | `deepResearch` | deep-research-pro-preview |
+| Competitive research | `deepResearch` | deep-research-pro-preview |
+| Grounded search | `flash` | gemini-3-flash-preview |
+| Content generation | `pro` (or selected model) | gemini-3-pro-preview |
+| Attack prompts | `pro` | gemini-3-pro-preview |
+| Refinement | selected model | gemini-3-pro-preview |
+| Scoring | all 5 scorers | gemini-3-flash-preview |
+| Deslop | `deslop` | gemini-3-pro-preview |
+| JSON generation | `pro` | gemini-3-pro-preview |
