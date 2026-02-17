@@ -1,269 +1,296 @@
-# Messaging Engine — Complete Documentation
+# PMM Messaging Engine — Technical Documentation
 
-## What Is This?
+*Comprehensive Architecture, Pipeline, and Prompt Reference*
 
-The PMM Messaging Engine converts product documentation and community evidence into scored, traceable marketing messaging assets. It generates battlecards, talk tracks, launch messaging, social hooks, one-pagers, email copy, messaging templates, and narratives — each grounded in real practitioner evidence and stress-tested for quality.
+---
 
-## How It Works
+## 1. Executive Summary
 
-### 1. Users Create Workspace Sessions
+The PMM Messaging Engine converts product documentation into scored, quality-tested messaging assets through 5 specialized AI pipelines. It follows an "outside-in" philosophy — starting with real practitioner pain from developer communities rather than vendor features.
 
-A session defines:
-- **Product context**: uploaded documents or pasted text
-- **Pain point**: discovered from community sources or manually entered
-- **Asset types**: which of the 8 messaging formats to generate
-- **Voice profile(s)**: tone and audience targeting
-- **Pipeline**: which generation strategy to use (5 options)
-- **Focus instructions**: optional steering for the generation
+### Key Capabilities
 
-### 2. A Generation Pipeline Runs
+- **5 distinct generation pipelines** — Standard, Outside-In (signature), Adversarial, Multi-Perspective, and Straight Through
+- **Sequential DAG architecture** — each pipeline step feeds the next
+- **Shared refinement loop** — score → deslop → refine (up to 3x) with plateau detection
+- **Multi-model AI strategy** — Gemini 3 Pro/Flash (production) with test profile fallback
+- **5-dimension quality scoring** with scorer health tracking and degraded mode
+- **8 asset types** from battlecards to narratives
+- **Voice profile system** with per-voice quality thresholds
 
-The selected pipeline (default: Outside-In) executes:
-1. **Extract product insights** — domain, category, personas, capabilities via Gemini Flash
-2. **Research** — community deep research (practitioner quotes, pain points) + competitive analysis via Gemini Deep Research
-3. **Generate** — per asset type × voice, using the pipeline's specific strategy
-4. **Score** — 5-dimension quality scoring (slop, vendor-speak, authenticity, specificity, persona fit)
-5. **Refine** — iterative improvement until quality gates pass or plateau
-6. **Store** — assets, variants, and traceability records
+### Tech Stack
 
-### 3. Users Refine in the Workspace
+| Layer | Technology |
+|-------|-----------|
+| Backend | Hono (REST API), TypeScript |
+| Frontend | Vite + React + Tailwind CSS |
+| Database | SQLite + Drizzle ORM (14 tables) |
+| AI Models | Gemini 3 Pro/Flash (prod), Gemini 2.5 Flash (test), Claude (opt-in) |
 
-After generation, users can:
-- **Edit** content directly (creates a new scored version)
-- **Chat** with the AI to refine specific assets (SSE streaming)
-- **Run actions**: deslop, regenerate, voice change, adversarial loop, competitive deep dive, community check, multi-perspective rewrite
-- **Compare versions** and activate any previous version
-- **Track** all changes with scores and source attribution
+---
 
-## Architecture
+![System Architecture](01-system-architecture.png)
+
+## 2. System Architecture
+
+### File Structure
 
 ```
-React UI (Vite + Tailwind) ──→ Hono API Server (port 3007) ──→ SQLite (20 tables)
-                                      │
-                                      ├── Pipeline Engine (5 pipelines)
-                                      ├── Workspace System (sessions, versions, actions, chat)
-                                      ├── Quality Scoring (5 parallel scorers)
-                                      └── AI Clients (Gemini Flash/Pro/Deep Research + Claude)
+src/
+├── api/
+│   ├── generate.ts              # ~186 lines — route definitions + re-exports only
+│   ├── validation.ts            # Zod schemas for all endpoints
+│   ├── index.ts                 # Hono app + route mounting
+│   ├── middleware/
+│   │   ├── auth.ts              # JWT authentication (hard error)
+│   │   └── rate-limit.ts        # Per-IP HTTP rate limiting
+│   ├── admin/                   # Admin CRUD (settings, voices, documents)
+│   └── workspace/               # Session management, chat, actions
+├── config.ts                    # Model profiles, env config
+├── types/index.ts               # Shared interfaces (ScoringThresholds, PipelineStep, etc.)
+├── services/
+│   ├── pipeline/
+│   │   ├── orchestrator.ts      # Job lifecycle, dispatch, generateAndScore, refinementLoop, storeVariant
+│   │   ├── prompts.ts           # All prompt builders, templates, banned words
+│   │   ├── evidence.ts          # EvidenceBundle, community/competitive research
+│   │   └── pipelines/
+│   │       ├── standard.ts      # PoV-first with deep extraction
+│   │       ├── outside-in.ts    # Community pain-first (signature)
+│   │       ├── adversarial.ts   # Attack/defend generation
+│   │       ├── multi-perspective.ts  # 3 angles + synthesis
+│   │       └── straight-through.ts   # Score-only, no generation
+│   ├── quality/
+│   │   ├── score-content.ts     # 5 parallel scorers + health tracking
+│   │   ├── slop-detector.ts     # AI cliché detection
+│   │   ├── vendor-speak.ts      # Marketing jargon scorer
+│   │   ├── authenticity.ts      # Authenticity scorer
+│   │   ├── specificity.ts       # Specificity scorer
+│   │   ├── persona-critic.ts    # Persona fit scorer
+│   │   └── grounding-validator.ts # Strips fabricated quotes
+│   ├── ai/clients.ts            # Gemini + Claude API wrappers
+│   ├── product/insights.ts      # Insight extraction + deep PoV
+│   └── research/deep-research.ts # Gemini Deep Research agent
+├── db/                          # Schema, connection, seed data
+└── utils/                       # Logger, hash, retry
 ```
 
-- **Nginx** proxies port 91 → 3007
-- **PM2** manages the Node.js process
-- **SQLite** with Drizzle ORM (20 tables, single file)
+### Security
 
-## 5 Generation Pipelines
+| Layer | Mechanism |
+|-------|-----------|
+| Authentication | JWT — hard error on invalid/missing token |
+| Validation | Zod schemas on all request bodies |
+| Rate Limiting | Per-IP, per-path (Flash: 60/min, Pro: 15/min) |
+| Input Limits | productDocs: 500K chars, prompt: 10K chars |
 
-| Pipeline | Strategy | When to Use |
-|----------|----------|-------------|
-| **Standard** | Deep PoV → research → generate → refine | General messaging from product docs |
-| **Outside-In** | Community-first, fails without evidence | Maximum practitioner authenticity |
-| **Adversarial** | Generate → 2× attack/defend → refine | Battle-tested, objection-proof messaging |
-| **Multi-Perspective** | 3 angles → synthesize best → refine | Well-rounded, comprehensive messaging |
-| **Straight-Through** | Score only, no generation | Evaluate existing messaging quality |
+---
 
-## 8 Asset Types
+## 3. Model Profile System
 
-| Type | Description |
-|------|-------------|
-| Battlecard | Competitive comparison and positioning |
-| Talk Track | Sales conversation guide |
-| Launch Messaging | Product launch announcements |
-| Social Hook | Social media engagement hooks |
-| One-Pager | Single-page product summary |
-| Email Copy | Email campaign content |
-| Messaging Template | Comprehensive positioning document (3000–5000 words) |
-| Narrative | 3-variant storytelling document |
+![Multi-Model Strategy](03-multi-model-strategy.png)
 
-## Quality System
-
-**5 scoring dimensions** (0–10 scale):
-- **Slop** (lower = better): AI cliches, filler, hedging
-- **Vendor-Speak** (lower = better): self-congratulatory marketing language
-- **Authenticity** (higher = better): sounds like a real human wrote it
-- **Specificity** (higher = better): concrete details over vague generalities
-- **Persona-Fit** (higher = better): resonates with target audience
-
-**Quality gates** are per-voice-profile. All 5 dimensions must pass their thresholds.
-
-**Banned words**: 13 static defaults + LLM-generated per-voice banned words (cached, 3× retry).
-
-## Model Profile System
-
-`MODEL_PROFILE` env var controls which models are used:
+Controlled by `MODEL_PROFILE` env var. Every model call logs the actual model name and emits it via pipeline step events for UI visibility.
 
 | Task | Production | Test |
 |------|-----------|------|
-| Flash (scoring, classification) | gemini-3-flash-preview | gemini-2.5-flash |
-| Pro (generation, deslop) | gemini-3-pro-preview | gemini-2.5-flash |
-| Deep Research | deep-research-pro-preview | gemini-2.5-flash |
+| flash | gemini-3-flash-preview | gemini-2.5-flash |
+| pro | gemini-3-pro-preview | gemini-2.5-flash |
+| deepResearch | deep-research-pro-preview-12-2025 | gemini-2.5-flash |
+| generation | gemini-3-pro-preview | gemini-2.5-flash |
+| scoring | gemini-3-flash-preview | gemini-2.5-flash |
+| deslop | gemini-3-pro-preview | gemini-2.5-flash |
 
-Claude (`claude-opus-4-6`) is available as an explicit opt-in override only.
+Test profile uses a single cheap model for all tasks — ideal for development and CI.
 
-## LLM Call Logging
+---
 
-Every AI call is logged to the `llm_calls` table:
-- Model, purpose, prompts, response, token usage, latency, success/failure
-- Context (session ID, job ID, purpose) threaded automatically via AsyncLocalStorage
-- Fire-and-forget — never blocks or throws
+## 4. Quality Scoring System
 
-## Database (20 Tables)
+5 independent scorers run in parallel via `Promise.all`:
 
-**Core**: messaging_priorities, discovery_schedules, discovered_pain_points, generation_jobs, settings, product_documents, messaging_assets, persona_critics, persona_scores, competitive_research, asset_traceability, messaging_gaps, voice_profiles, asset_variants
+| Scorer | Scale | Direction | What It Measures |
+|--------|-------|-----------|-----------------|
+| Slop | 0-10 | Lower is better | AI clichés, filler phrases |
+| Vendor Speak | 0-10 | Lower is better | Marketing jargon, buzzwords |
+| Authenticity | 0-10 | Higher is better | Genuine practitioner voice |
+| Specificity | 0-10 | Higher is better | Concrete details vs vague claims |
+| Persona | 0-10 | Higher is better | Fit with target persona |
 
-**Workspace** (new): users, sessions, session_versions, session_messages, action_jobs, llm_calls
+### Scorer Health & Degraded Mode
 
-See `DATABASE.md` for complete schema reference.
+Each scoring run tracks health: `{ succeeded: N, failed: [...], total: 5 }`.
 
-## API Routes
+If a scorer throws, it returns a neutral fallback score of 5 and the failure is logged. The system continues in degraded mode rather than failing the entire job. Health is visible in the pipeline step UI.
 
-### Public (no auth, rate limited)
-- `POST /api/upload` — File upload
-- `POST /api/extract` — Text extraction
-- `GET /api/voices` — Voice profiles
-- `GET /api/asset-types` — Asset types
-- `GET /api/history` — Generation history
-- `POST /api/auth/login` — Login
-- `POST /api/auth/signup` — Register
+### Quality Gates (Per-Voice Thresholds)
 
-### Admin (JWT required)
-- `/api/admin/documents` — Product documents
-- `/api/admin/voices` — Voice profiles
-- `/api/admin/settings` — Settings
-- `GET /api/admin/stats` — Dashboard stats
+![Quality Pipeline](04-quality-pipeline.png)
 
-### Workspace (JWT required)
-- Session CRUD, generation, status polling
-- Version management (list, edit, activate)
-- Action execution (7 actions) with background progress
-- SSE streaming chat refinement
-- Message history and LLM call logs
+| Gate | Default | Direction |
+|------|---------|-----------|
+| slopMax | 5 | Reject if above |
+| vendorSpeakMax | 5 | Reject if above |
+| authenticityMin | 6 | Reject if below |
+| specificityMin | 6 | Reject if below |
+| personaMin | 6 | Reject if below |
 
-## Tech Stack
+---
 
-- **Runtime**: Node.js + TypeScript (ESM)
-- **Server**: Hono
-- **Database**: SQLite + Drizzle ORM
-- **UI**: Vite + React + Tailwind
-- **AI**: Google Gemini (primary) + Anthropic Claude (opt-in)
-- **Auth**: JWT (jose) + bcryptjs
-- **Process**: PM2
-- **Testing**: Vitest (5min timeout, forks pool)
+## 5. Pipelines
 
-## Operations
 
-```bash
-# Start/Stop
-./start.sh          # PM2 start
-./stop.sh           # PM2 stop
+![All Pipelines](05-pipelines-comparison.png)
 
-# Deploy (build + commit + restart)
-./deploy.sh
+All pipelines follow a sequential DAG pattern. Each step feeds the next — no branching.
 
-# Tests
-npm test            # Unit tests (MODEL_PROFILE=test)
-npm run test:e2e    # E2E tests (5min timeout)
+### 5.1 Standard Pipeline
 
-# Logs
-pm2 logs messaging-engine
+
+![Standard Pipeline](06-standard-pipeline.png)
+
+**PoV-first — extract a deep product thesis before generating.**
+
+```
+Deep PoV Extraction (Pro)
+  → Insight Extraction (Flash)
+  → Community Research (Deep Research)
+  → Competitive Research (Deep Research)
+  → For each assetType × voice:
+      → Generate with PoV-first prompt (Pro)
+      → Score → Refinement Loop (up to 3x) → Store
 ```
 
-## Key Files
+### 5.2 Outside-In Pipeline (Signature)
 
-| File | Purpose |
-|------|---------|
-| `src/config.ts` | Config + Model Profile System |
-| `src/db/schema.ts` | 20 table definitions |
-| `src/services/pipeline/orchestrator.ts` | Pipeline primitives + dispatch |
-| `src/services/pipeline/prompts.ts` | All prompt builders |
-| `src/services/pipeline/evidence.ts` | Research bundling |
-| `src/services/pipeline/pipelines/*.ts` | 5 pipeline implementations |
-| `src/services/workspace/*.ts` | Session, version, action, chat |
-| `src/services/quality/score-content.ts` | Centralized scoring |
-| `src/services/ai/clients.ts` | AI client layer |
-| `src/services/ai/call-logger.ts` | LLM call logging |
-| `src/services/ai/call-context.ts` | AsyncLocalStorage context |
-| `templates/*.md` | 8 asset type templates |
 
-## Design Decisions & Evolution
+![Outside-In Pipeline](02-outside-in-pipeline.png)
 
-This section captures the key design decisions and the reasoning behind them, drawn from the project's commit history. Understanding *why* things are the way they are prevents repeating past mistakes.
+**Community pain-first — start with real practitioner frustrations.**
 
-### The God File Extraction (`a1d9071`, `6e4f7b4`)
+```
+Insight Extraction (Flash)
+  → Community Deep Research (Deep Research)
+  → Competitive Research (Deep Research)
+  → For each assetType × voice:
+      → Generate with pain-first prompt (Pro)
+      → Score → Refinement Loop (up to 3x) → Store
+```
 
-`src/api/generate.ts` started as a monolithic "god file" containing all pipeline logic, prompt builders, evidence gathering, and variant storage. It was extracted into `src/services/pipeline/` modules (orchestrator, evidence, prompts, per-pipeline files). Workspace actions were then refactored to compose from these shared primitives rather than duplicating logic. The key insight: **single source of truth for generate+score+refine**, reused by both pipelines and workspace actions.
+### 5.3 Adversarial Pipeline
 
-### Authenticity Scoring Was Faked (`b7aaebd`)
 
-A critical bug: `scoreContent()` was copy-pasted into 3 locations, and 2 of them faked the authenticity score as `Math.max(0, 10 - vendorSpeakScore)` instead of calling the real `analyzeAuthenticity()` scorer. This was caught and fixed by creating a single shared `score-content.ts` module. **Lesson**: never duplicate scoring logic. The shared module now runs all 5 real scorers in parallel with individual fallbacks.
+![Adversarial Pipeline](07-adversarial-pipeline.png)
 
-### Outside-In: Fail Hard, No Fallback (`0516c3e`, `9489b8e`)
+**Attack/defend — generate objections, then craft messaging that survives them.**
 
-The outside-in pipeline originally fell back to the standard pipeline when no community evidence was found. This silently produced standard-pipeline output labeled as "outside-in," destroying the pipeline's purpose. The fix: **fail hard with an explicit error** when community evidence retries are exhausted. If the user wants standard pipeline behavior, they should select the standard pipeline. The outside-in pipeline's contract is: real community evidence or nothing.
+```
+Insight Extraction (Flash)
+  → Research (Deep Research)
+  → For each assetType × voice:
+      → Generate attack (hostile buyer objections)
+      → Generate defense (messaging addressing attacks)
+      → Score defense → Refinement Loop (up to 3x) → Store
+```
 
-### Product Doc Layering Removed from Outside-In (`5f0137c`)
+### 5.4 Multi-Perspective Pipeline
 
-Step 6 of the outside-in pipeline ("layer product specifics") was causing the uploaded product doc to override the practitioner voice — the exact thing outside-in is designed to avoid. It was removed entirely. The enriched draft flows directly from competitive enrichment into refinement, keeping practitioner pain front and center.
 
-### Evidence Grounding: Naive Scrapers → AI Discovery → Deep Research (`c19fb5a`, `52a614b`)
+![Multi-Perspective Pipeline](08-multi-perspective-pipeline.png)
 
-The evidence system went through 3 generations:
-1. **Direct API scrapers** (Reddit, HN, SO, GitHub, Discourse) — fragile, rate-limited, keyword-dependent
-2. **Gemini grounded search** — AI-powered but still keyword-based, returned empty results non-deterministically
-3. **Gemini Deep Research** — single call searches all sources natively, eliminates intermediate keyword extraction
+**3 angles + synthesis — practitioner, buyer, executive perspectives merged.**
 
-The scrapers were deleted (-1,109 lines). Deep Research is now the sole evidence source. Grounded search retries 5x on empty results (the API is flaky — same prompt returns rich results on retry).
+```
+Insight Extraction (Flash)
+  → Research (Deep Research)
+  → For each assetType × voice:
+      → Generate Practitioner angle
+      → Generate Buyer angle
+      → Generate Executive angle
+      → Synthesize into unified content
+      → Score → Refinement Loop (up to 3x) → Store
+```
 
-### Domain-Agnostic Prompts (`4d976b9`)
+### 5.5 Straight Through Pipeline
 
-All prompts originally had hardcoded observability/SRE language baked in. This was replaced with domain-agnostic language that infers the product domain from extracted insights. The engine now works for any product domain.
 
-### Dynamic Banned Words (`7afe971`, `0eef476`)
+![Straight Through Pipeline](09-straight-through-pipeline.png)
 
-The banned words system evolved from a static hardcoded list → dynamic per-voice generation via Gemini Flash. The LLM generates 15-20 voice/domain-specific banned words, cached per `voiceId:domain`. The static list is kept as fallback (3x retry with backoff before falling back).
+**Score-only — evaluate existing content without any generation.**
 
-### maxTokens Truncation Bugs (`ac61fec`, `714c021`)
+```
+Insight Extraction (Flash)
+  → For each assetType × voice:
+      → Score existing content (5 scorers)
+      → Store (original content preserved as-is)
+```
 
-Hardcoded `maxTokens: 50` on session naming caused Gemini to truncate to 0 tokens 40% of the time. More broadly, low hardcoded `maxTokens` values across 8 call sites caused silent truncation with newer models. Fix: **never hardcode maxTokens unless you need more than the default**. Claude still requires explicit `max_tokens` so it uses 16384.
+**Key differences:**
+- NO generation — content is never rewritten
+- NO refinement loop — no deslop, no iteration
+- NO research phase
+- Requires `existingMessaging` — fails if not provided
 
-### Async Background Jobs (`7399146`)
+**Use case:** Benchmarking existing marketing content.
 
-All 7 workspace actions originally ran synchronously, causing Cloudflare 100s timeout for long operations (especially competitive deep dive and community check which involve Deep Research). Solution: `action_jobs` table with fire-and-forget execution. Frontend polls a status endpoint every 3s.
+---
 
-### PM2: tsx watch → node dist (`ac61fec`)
+## 6. Shared Pipeline Components
 
-PM2 was originally configured with `tsx watch`, which caused EADDRINUSE crashes when file-watching restarts killed in-flight Deep Research operations. Switched to `node dist/index.js` — more stable for a production process that runs long async operations.
+### Refinement Loop
 
-### Chat Switched from Claude to Gemini (`81fd2c9`)
+1. Score with 5 scorers
+2. If quality gates pass → done
+3. Deslop to remove AI clichés
+4. Build refinement prompt with score feedback
+5. Regenerate
+6. Rescore — stop if plateau detected
+7. Repeat up to 3 times
 
-Workspace chat originally used Claude for streaming responses. This was switched to Gemini Pro to keep the entire system on a single AI provider by default. Claude remains available as an opt-in override for generation.
+### Evidence Bundle
 
-### Model Profile System (`87981d0`, `34aaa9b`)
+Community and competitive research packaged as `EvidenceBundle`:
+- `communityPain` — real developer frustrations
+- `competitorWeaknesses` — positioning gaps
+- `practitionerQuotes` — attributed quotes with source URLs
+- `evidenceLevel` — `strong` | `moderate` | `weak`
 
-Created to prevent accidental production model spend during testing. `MODEL_PROFILE=test` swaps all models to Gemini 2.5 Flash. A guard test (`model-profile-guard.test.ts`) fails if tests run against production models. The config auto-detects the Vitest environment and defaults to test profile.
+---
 
-### Split Research Pipeline Removed (`a622121`)
+## 7. API Reference
 
-A "split-research" pipeline was removed as redundant with the standard pipeline. This left 4 pipelines (standard, outside-in, adversarial, multi-perspective). The straight-through pipeline was added later as the 5th.
+### Core Endpoints
 
-### Sequential DAG Pipelines (`a622121`, `aa698ec`)
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/generate` | JWT | Start generation job |
+| GET | `/api/voices` | JWT | List voice profiles |
+| POST | `/api/extract` | JWT | Extract document content |
+| POST | `/api/auth/login` | — | Get JWT token |
+| POST | `/api/auth/signup` | — | Create account |
 
-Pipelines were refactored from parallel to sequential DAGs — each step feeds the next. Community research findings feed into competitive research prompts. Only multi-perspective retains parallel generation (3 perspectives) by design.
+### Generate Request Schema
 
-### Tiered Insights Replace Raw Truncation (`c8f4cff`)
+```json
+{
+  "productDocs": "string (required, max 500K)",
+  "existingMessaging": "string (optional, max 500K)",
+  "prompt": "string (optional, max 10K)",
+  "voiceProfileIds": ["string (min 1)"],
+  "assetTypes": ["battlecard | talk_track | launch_messaging | social_hook | one_pager | email_copy | messaging_template | narrative"],
+  "model": "string (optional)",
+  "pipeline": "standard | outside-in | adversarial | multi-perspective | straight-through"
+}
+```
 
-Every pipeline was independently truncating raw product docs (often just the executive summary / vendor positioning). Replaced with `extractInsights()` running once per job and 4 tiered formatters providing the right level of context to each stage: discovery (~150 chars), research (~1-2K), generation (~2-3K), scoring (~1-2K). This eliminated vendor framing from community search and competitive research prompts.
+### Asset Types
 
-### LLM-Based Spirit Validation (`9bd9618`)
-
-E2E tests don't just check that pipelines complete — they use Gemini to score whether the output matches the pipeline's *intent*:
-- Outside-in: must be practitioner-driven, low product doc influence
-- Standard: must have strong product PoV and thesis
-- Adversarial: must feel battle-tested, acknowledge weaknesses
-- Multi-perspective: must cover multiple distinct angles
-
-### No Cron (`tests/unit/architecture/no-cron.test.ts`)
-
-There is no scheduler/cron in the application. A unit test enforces this by scanning source files. All work is triggered by API requests. The previous architecture had node-cron for discovery scheduling, but this was removed when the system shifted to an on-demand workspace model.
-
-### Dead Code Sweep (`81fd2c9`)
-
-A major cleanup deleted 25 dead files: 7 frontend pages, 6 admin routes, 11 services, and 18 dead API client methods. The discovery/scheduling/cron pipeline was the primary casualty — replaced by the on-demand workspace model where users create sessions and trigger generation explicitly.
+| Type | Label |
+|------|-------|
+| battlecard | Battlecard |
+| talk_track | Talk Track |
+| launch_messaging | Launch Messaging |
+| social_hook | Social Hook |
+| one_pager | One-Pager |
+| email_copy | Email Copy |
+| messaging_template | Messaging Template |
+| narrative | Narrative |
