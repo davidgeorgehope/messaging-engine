@@ -53,7 +53,7 @@ const TEST_VOICE = {
 Direct, experienced, slightly skeptical, helpful.
 NO marketing language, superlatives, or exclamation marks.
 Short sentences. No filler. If a sentence doesn't add information, delete it.`,
-  thresholds: { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 5, specificityMin: 5, personaMin: 5 },
+  thresholds: { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 5, specificityMin: 5, personaMin: 5, narrativeArcMin: 5 },
 };
 
 function buildSystemPrompt(assetType: AssetType): string {

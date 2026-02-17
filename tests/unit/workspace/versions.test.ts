@@ -72,6 +72,7 @@ vi.mock('../../../src/services/quality/score-content.js', () => ({
     authenticityMin: 6,
     specificityMin: 6,
     personaMin: 6,
+    narrativeArcMin: 5,
   },
 }));
 
@@ -92,6 +93,7 @@ describe('createEditVersion', () => {
     authenticityScore: 7,
     specificityScore: 8,
     personaAvgScore: 7.5,
+    narrativeArcScore: 6,
     slopAnalysis: { score: 3 },
   };
 

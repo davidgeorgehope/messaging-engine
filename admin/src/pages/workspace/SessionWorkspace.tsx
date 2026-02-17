@@ -37,8 +37,8 @@ function ScoreBadge({ label, value, threshold, inverted = false }: {
 
 interface ScoreDelta {
   actionName: string;
-  previous: { slop: number | null; vendorSpeak: number | null; authenticity: number | null; specificity: number | null; persona: number | null; passesGates: boolean } | null;
-  current: { slop: number | null; vendorSpeak: number | null; authenticity: number | null; specificity: number | null; persona: number | null; passesGates: boolean } | null;
+  previous: { slop: number | null; vendorSpeak: number | null; authenticity: number | null; specificity: number | null; persona: number | null; narrativeArc: number | null; passesGates: boolean } | null;
+  current: { slop: number | null; vendorSpeak: number | null; authenticity: number | null; specificity: number | null; persona: number | null; narrativeArc: number | null; passesGates: boolean } | null;
   message?: string;
 }
 
@@ -89,6 +89,7 @@ function ScoreDeltaBanner({ delta, onDismiss }: { delta: ScoreDelta; onDismiss: 
         <DeltaValue label="Auth" prev={delta.previous.authenticity} curr={delta.current.authenticity} />
         <DeltaValue label="Spec" prev={delta.previous.specificity} curr={delta.current.specificity} />
         <DeltaValue label="Persona" prev={delta.previous.persona} curr={delta.current.persona} />
+        <DeltaValue label="Arc" prev={delta.previous.narrativeArc} curr={delta.current.narrativeArc} />
       </div>
       {gateChanged && (
         <div className={`mt-2 text-xs font-medium ${delta.current.passesGates ? 'text-green-700' : 'text-red-700'}`}>
@@ -264,6 +265,7 @@ export default function SessionWorkspace() {
         authenticity: result.version.authenticityScore,
         specificity: result.version.specificityScore,
         persona: result.version.personaAvgScore,
+        narrativeArc: result.version.narrativeArcScore,
         passesGates: !!result.version.passesGates,
       };
       setScoreDelta({ actionName, previous: previousScores, current: currentScores });
@@ -409,6 +411,7 @@ export default function SessionWorkspace() {
         authenticity: activeVersion.authenticityScore,
         specificity: activeVersion.specificityScore,
         persona: activeVersion.personaAvgScore,
+        narrativeArc: activeVersion.narrativeArcScore,
         passesGates: activeVersion.passesGates,
       };
     }
@@ -646,6 +649,7 @@ export default function SessionWorkspace() {
               <ScoreBadge label="Authenticity" value={displayScores.authenticity} threshold={6} />
               <ScoreBadge label="Specificity" value={displayScores.specificity} threshold={6} />
               <ScoreBadge label="Persona" value={displayScores.persona} threshold={6} />
+              <ScoreBadge label="Arc" value={displayScores.narrativeArc} threshold={5} />
             </div>
           )}
 

@@ -65,7 +65,7 @@ vi.mock('../../../src/services/quality/score-content.js', () => ({
   scoreContent: mockScoreContent,
   checkQualityGates: mockCheckQualityGates,
   totalQualityScore: vi.fn(),
-  DEFAULT_THRESHOLDS: { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6 },
+  DEFAULT_THRESHOLDS: { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6, narrativeArcMin: 5 },
 }));
 
 vi.mock('../../../src/services/quality/slop-detector.js', () => ({
@@ -123,10 +123,11 @@ const fakeScores = {
   authenticityScore: 8,
   specificityScore: 7,
   personaAvgScore: 7.5,
+  narrativeArcScore: 6,
   slopAnalysis: { score: 2 },
 };
 
-const thresholds = { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6 };
+const thresholds = { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6, narrativeArcMin: 5 };
 
 describe('createVersionAndActivate (via runDeslopAction)', () => {
   beforeEach(() => {

@@ -6,6 +6,7 @@ import { analyzeSlop, type SlopAnalysis } from './slop-detector.js';
 import { analyzeVendorSpeak } from './vendor-speak.js';
 import { analyzeSpecificity } from './specificity.js';
 import { analyzeAuthenticity } from './authenticity.js';
+import { analyzeNarrativeArc } from './narrative-arc.js';
 import { runPersonaCritics } from './persona-critic.js';
 import { createLogger } from '../../utils/logger.js';
 
@@ -23,6 +24,7 @@ export interface ScoreResults {
   authenticityScore: number;
   specificityScore: number;
   personaAvgScore: number;
+  narrativeArcScore: number;
   slopAnalysis: SlopAnalysis;
   scorerHealth: ScorerHealth;
 }
@@ -33,16 +35,18 @@ export const DEFAULT_THRESHOLDS = {
   authenticityMin: 6,
   specificityMin: 6,
   personaMin: 6,
+  narrativeArcMin: 5,
 };
 
 export async function scoreContent(content: string, productDocs: string[] = []): Promise<ScoreResults> {
   const failed: string[] = [];
 
-  const [slopAnalysis, vendorAnalysis, specificityAnalysis, authenticityAnalysis, personaResults] = await Promise.all([
+  const [slopAnalysis, vendorAnalysis, specificityAnalysis, authenticityAnalysis, narrativeArcAnalysis, personaResults] = await Promise.all([
     analyzeSlop(content).catch((err) => { logger.warn('Slop analysis failed, using fallback', { error: String(err) }); failed.push('slop'); return { score: 5, matches: [], matchCount: 0, categoryCounts: {} }; }),
     analyzeVendorSpeak(content).catch((err) => { logger.warn('Vendor-speak analysis failed, using fallback', { error: String(err) }); failed.push('vendorSpeak'); return { score: 5 }; }),
     analyzeSpecificity(content, productDocs).catch((err) => { logger.warn('Specificity analysis failed, using fallback', { error: String(err) }); failed.push('specificity'); return { score: 5 }; }),
     analyzeAuthenticity(content).catch((err) => { logger.warn('Authenticity analysis failed, using fallback', { error: String(err) }); failed.push('authenticity'); return { score: 5 }; }),
+    analyzeNarrativeArc(content).catch((err) => { logger.warn('Narrative arc analysis failed, using fallback', { error: String(err) }); failed.push('narrativeArc'); return { score: 5 }; }),
     runPersonaCritics(content).catch((err) => { logger.warn('Persona critics failed, using fallback', { error: String(err) }); failed.push('persona'); return []; }),
   ]);
 
@@ -51,9 +55,9 @@ export async function scoreContent(content: string, productDocs: string[] = []):
     : 5;
 
   const scorerHealth: ScorerHealth = {
-    succeeded: 5 - failed.length,
+    succeeded: 6 - failed.length,
     failed,
-    total: 5,
+    total: 6,
   };
 
   if (failed.length > 0) {
@@ -66,6 +70,7 @@ export async function scoreContent(content: string, productDocs: string[] = []):
     authenticityScore: authenticityAnalysis.score,
     specificityScore: specificityAnalysis.score,
     personaAvgScore: Math.round(personaAvg * 10) / 10,
+    narrativeArcScore: narrativeArcAnalysis.score,
     slopAnalysis,
     scorerHealth,
   };
@@ -79,12 +84,14 @@ export function checkQualityGates(scores: ScoreResults, thresholds: ScoringThres
     scores.vendorSpeakScore <= (thresholds.vendorSpeakMax ?? DEFAULT_THRESHOLDS.vendorSpeakMax) &&
     scores.authenticityScore >= (thresholds.authenticityMin ?? DEFAULT_THRESHOLDS.authenticityMin) &&
     scores.specificityScore >= (thresholds.specificityMin ?? DEFAULT_THRESHOLDS.specificityMin) &&
-    scores.personaAvgScore >= (thresholds.personaMin ?? DEFAULT_THRESHOLDS.personaMin)
+    scores.personaAvgScore >= (thresholds.personaMin ?? DEFAULT_THRESHOLDS.personaMin) &&
+    scores.narrativeArcScore >= (thresholds.narrativeArcMin ?? DEFAULT_THRESHOLDS.narrativeArcMin)
   );
 }
 
 export function totalQualityScore(scores: ScoreResults): number {
   // Higher is better: invert slop and vendor (where lower is better)
   return (10 - scores.slopScore) + (10 - scores.vendorSpeakScore) +
-    scores.authenticityScore + scores.specificityScore + scores.personaAvgScore;
+    scores.authenticityScore + scores.specificityScore + scores.personaAvgScore +
+    scores.narrativeArcScore;
 }

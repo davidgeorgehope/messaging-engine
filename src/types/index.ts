@@ -20,6 +20,7 @@ export interface ScoringThresholds {
   authenticityMin: number;
   specificityMin: number;
   personaMin: number;
+  narrativeArcMin: number;
 }
 
 export const DEFAULT_SCORING_THRESHOLDS: ScoringThresholds = {
@@ -28,6 +29,7 @@ export const DEFAULT_SCORING_THRESHOLDS: ScoringThresholds = {
   authenticityMin: 6,
   specificityMin: 6,
   personaMin: 6,
+  narrativeArcMin: 5,
 };
 
 export function parseScoringThresholds(raw: string | null): ScoringThresholds {
@@ -40,6 +42,7 @@ export function parseScoringThresholds(raw: string | null): ScoringThresholds {
       authenticityMin: parsed.authenticityMin ?? DEFAULT_SCORING_THRESHOLDS.authenticityMin,
       specificityMin: parsed.specificityMin ?? DEFAULT_SCORING_THRESHOLDS.specificityMin,
       personaMin: parsed.personaMin ?? DEFAULT_SCORING_THRESHOLDS.personaMin,
+      narrativeArcMin: parsed.narrativeArcMin ?? DEFAULT_SCORING_THRESHOLDS.narrativeArcMin,
     };
   } catch {
     return { ...DEFAULT_SCORING_THRESHOLDS };

@@ -44,6 +44,7 @@ export interface ActionResult {
     authenticity: number | null;
     specificity: number | null;
     persona: number | null;
+    narrativeArc: number | null;
     passesGates: boolean;
   } | null;
 }
@@ -56,6 +57,7 @@ function extractPreviousScores(active: SessionVersion | null | undefined): Actio
     authenticity: active.authenticityScore,
     specificity: active.specificityScore,
     persona: active.personaAvgScore,
+    narrativeArc: (active as any).narrativeArcScore ?? null,
     passesGates: !!active.passesGates,
   };
 }
@@ -125,6 +127,7 @@ async function createVersionAndActivate(
     authenticityScore: scores?.authenticityScore ?? null,
     specificityScore: scores?.specificityScore ?? null,
     personaAvgScore: scores?.personaAvgScore ?? null,
+    narrativeArcScore: scores?.narrativeArcScore ?? null,
     passesGates,
     isActive: true,
     createdAt: new Date().toISOString(),
@@ -137,10 +140,10 @@ async function loadSessionThresholds(sessionId: string) {
   const db = getDatabase();
   const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
   if (!session?.voiceProfileId) {
-    return { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6 };
+    return { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6, narrativeArcMin: 5 };
   }
   const voice = await db.query.voiceProfiles.findFirst({ where: eq(voiceProfiles.id, session.voiceProfileId) });
-  if (!voice) return { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6 };
+  if (!voice) return { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6, narrativeArcMin: 5 };
   return parseScoringThresholds(voice.scoringThresholds);
 }
 
@@ -428,6 +431,7 @@ export async function runAdversarialLoopAction(sessionId: string, assetType: str
       if (scores.authenticityScore < 9) issues.push(`Authenticity is ${scores.authenticityScore.toFixed(1)} — make it sound more genuinely human.`);
       if (scores.specificityScore < 9) issues.push(`Specificity is ${scores.specificityScore.toFixed(1)} — add more concrete details, numbers, or examples.`);
       if (scores.personaAvgScore < 9) issues.push(`Persona fit is ${scores.personaAvgScore.toFixed(1)} — better match the target audience's concerns and language.`);
+      if (scores.narrativeArcScore < 9) issues.push(`Narrative arc is ${scores.narrativeArcScore.toFixed(1)} — strengthen the story progression, tension, and resolution.`);
     } else {
       // Fix mode: target scores that fail thresholds
       if (scores.vendorSpeakScore > (thresholds.vendorSpeakMax ?? 5)) {
@@ -441,6 +445,9 @@ export async function runAdversarialLoopAction(sessionId: string, assetType: str
       }
       if (scores.personaAvgScore < (thresholds.personaMin ?? 6)) {
         issues.push(`Persona fit score ${scores.personaAvgScore.toFixed(1)} below min ${thresholds.personaMin}. Better match the target audience.`);
+      }
+      if (scores.narrativeArcScore < (thresholds.narrativeArcMin ?? 5)) {
+        issues.push(`Narrative arc score ${scores.narrativeArcScore.toFixed(1)} below min ${thresholds.narrativeArcMin}. Strengthen story progression — establish tension, build through insight, resolve with transformation.`);
       }
     }
 

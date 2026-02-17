@@ -199,6 +199,7 @@ app.post('/:id/chat/:messageId/accept', async (c) => {
     authenticityScore: scores.authenticityScore,
     specificityScore: scores.specificityScore,
     personaAvgScore: scores.personaAvgScore,
+    narrativeArcScore: scores.narrativeArcScore,
     passesGates,
     isActive: true,
     createdAt: new Date().toISOString(),

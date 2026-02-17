@@ -31,7 +31,7 @@ app.post('/', async (c) => {
     slug: slugify(body.name),
     description: body.description || '',
     voiceGuide: body.voiceGuide || '',
-    scoringThresholds: JSON.stringify(body.scoringThresholds || { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6 }),
+    scoringThresholds: JSON.stringify(body.scoringThresholds || { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6, narrativeArcMin: 5 }),
     examplePhrases: JSON.stringify(body.examplePhrases || { good: [], bad: [] }),
     isDefault: body.isDefault || false,
     isActive: true,

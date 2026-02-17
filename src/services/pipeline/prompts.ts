@@ -17,10 +17,11 @@ const logger = createLogger('pipeline:prompts');
 
 const TEMPLATE_DIR = join(process.cwd(), 'templates');
 
-export const ALL_ASSET_TYPES: AssetType[] = ['battlecard', 'talk_track', 'launch_messaging', 'social_hook', 'one_pager', 'email_copy', 'messaging_template', 'narrative'];
+export const ALL_ASSET_TYPES: AssetType[] = ['battlecard', 'talk_track', 'launch_messaging', 'social_hook', 'one_pager', 'email_copy', 'messaging_template', 'narrative', 'storyboard'];
 
 export const ASSET_TYPE_TEMPERATURE: Record<AssetType, number> = {
   social_hook: 0.85,
+  storyboard: 0.82,
   narrative: 0.8,
   email_copy: 0.75,
   launch_messaging: 0.7,
@@ -39,6 +40,7 @@ export const ASSET_TYPE_LABELS: Record<AssetType, string> = {
   email_copy: 'Email Copy',
   messaging_template: 'Messaging Template',
   narrative: 'Narrative',
+  storyboard: 'Storyboard',
 };
 
 export async function loadTemplate(assetType: AssetType): Promise<string> {
@@ -154,6 +156,38 @@ VARIANT 3 (~2500 words): Full narrative — thesis, broken promise, life in the 
 new approach, what changes, future state, taglines.
 Each variant must be standalone and readable on its own. Use thought-leadership tone.
 Weave practitioner quotes naturally throughout. Mark each variant clearly with headers.`;
+  } else if (assetType === 'storyboard') {
+    typeInstructions = `
+
+## Storyboard Instructions
+You are generating a multi-act transformation storyboard (2000-2500 words total).
+This is strategic storytelling — think T-Mobile Un-carrier style: the status quo is the villain, the product is the enabler (not the hero), and the customer's world is what transforms.
+
+### 3-Act Structure with 7 Scenes:
+
+**ACT 1: THE WORLD AS IT IS** (~800 words) — Emotion: frustration, recognition
+- Scene 1 (Status Quo Villain): Name the broken thing everyone accepts. Don't attack competitors — attack the approach.
+- Scene 2 (Human Cost): Make abstract pain concrete and personal. Show what it costs real people daily.
+- Scene 3 (Failed Attempts): Show why the problem persists structurally. Half-measures and band-aids haven't worked.
+
+**ACT 2: THE TURNING POINT** (~600 words) — Emotion: hope, excitement
+- Scene 4 (The Insight): The reframe — a contrarian question that changes everything. "What if we just... stopped doing that?"
+- Scene 5 (A Different Approach): What follows logically from the insight. This is where the product enters — as an enabler, not a hero.
+
+**ACT 3: THE NEW WORLD** (~600 words) — Emotion: excitement, aspiration
+- Scene 6 (The Transformation): Concrete before/after for the same scenarios from Act 1. Same person, completely different experience.
+- Scene 7 (The Invitation): Forward-looking vision, not a sales pitch. Invite the reader into the movement.
+
+### Additional Required Elements:
+- **STORY SPINE**: A single standalone paragraph using the "Once upon a time... Until one day... Because of that..." structure
+- **TAGLINES**: 5-8 sticky, memorable phrases that capture the transformation
+
+### Critical Rules:
+- The status quo is the VILLAIN — not a competitor
+- The product is the ENABLER — not the hero. The customer is the hero.
+- Each act must have distinct emotional beats (frustration → hope → excitement)
+- Practitioner quotes ground the story in reality — weave them into scenes naturally
+- Every scene must advance the narrative — no filler sections`;
   }
 
   const personaAngle = PERSONA_ANGLES[voice.slug] || '';
@@ -368,6 +402,9 @@ export function buildRefinementPrompt(
   }
   if (scores.personaAvgScore < thresholds.personaMin) {
     issues.push(`- **Persona Fit**: ${scores.personaAvgScore.toFixed(1)}/10 (min ${thresholds.personaMin}). Better match the ${voice.name} voice. The content should resonate with the target audience.`);
+  }
+  if (scores.narrativeArcScore < thresholds.narrativeArcMin) {
+    issues.push(`- **Narrative Arc**: ${scores.narrativeArcScore.toFixed(1)}/10 (min ${thresholds.narrativeArcMin}). Strengthen the story progression — establish clear tension/problem, build through insight, and resolve with transformation. Each section should advance the narrative.`);
   }
 
   return `Rewrite this ${assetType.replace(/_/g, ' ')} to fix the following quality issues:

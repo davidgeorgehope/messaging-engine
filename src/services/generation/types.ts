@@ -1,4 +1,4 @@
-export type AssetType = 'battlecard' | 'talk_track' | 'launch_messaging' | 'social_hook' | 'one_pager' | 'email_copy' | 'messaging_template' | 'narrative';
+export type AssetType = 'battlecard' | 'talk_track' | 'launch_messaging' | 'social_hook' | 'one_pager' | 'email_copy' | 'messaging_template' | 'narrative' | 'storyboard';
 
 export type GenerationStep = 'research' | 'context' | 'generate' | 'score' | 'stress_test' | 'store';
 
@@ -42,6 +42,7 @@ export interface ScoringThresholds {
   authenticityMin: number;
   specificityMin: number;
   personaMin: number;
+  narrativeArcMin: number;
 }
 
 export interface GeneratedVariant {

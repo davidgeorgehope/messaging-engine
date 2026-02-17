@@ -299,6 +299,7 @@ export async function getSessionWithResults(sessionId: string, userId?: string, 
             authenticity: variant?.authenticityScore ?? null,
             specificity: asset.specificityScore,
             persona: asset.personaAvgScore,
+            narrativeArc: (asset as any).narrativeArcScore ?? variant?.narrativeArcScore ?? null,
           },
           passesGates: variant?.passesGates ?? false,
         });

@@ -69,7 +69,7 @@ vi.mock('../../../src/services/quality/score-content.js', () => ({
   scoreContent: mockScoreContent,
   checkQualityGates: mockCheckQualityGates,
   totalQualityScore: mockTotalQualityScore,
-  DEFAULT_THRESHOLDS: { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6 },
+  DEFAULT_THRESHOLDS: { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6, narrativeArcMin: 5 },
 }));
 
 vi.mock('../../../src/services/quality/slop-detector.js', () => ({
@@ -128,6 +128,7 @@ const passingScores = {
   authenticityScore: 8,
   specificityScore: 8,
   personaAvgScore: 8,
+  narrativeArcScore: 7,
   slopAnalysis: { score: 2 },
 };
 
@@ -137,10 +138,11 @@ const failingScores = {
   authenticityScore: 3,
   specificityScore: 3,
   personaAvgScore: 3,
+  narrativeArcScore: 3,
   slopAnalysis: { score: 7 },
 };
 
-const thresholds = { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6 };
+const thresholds = { slopMax: 5, vendorSpeakMax: 5, authenticityMin: 6, specificityMin: 6, personaMin: 6, narrativeArcMin: 5 };
 
 function setupActiveVersion(content = 'original content', scores?: any) {
   // getActiveVersion: findMany returns versions, find the active one

@@ -4,7 +4,7 @@ import type { Context } from 'hono';
 // Asset types enum
 const AssetTypeEnum = z.enum([
   'battlecard', 'talk_track', 'launch_messaging', 'social_hook',
-  'one_pager', 'email_copy', 'messaging_template', 'narrative',
+  'one_pager', 'email_copy', 'messaging_template', 'narrative', 'storyboard',
 ]);
 
 // Pipeline enum

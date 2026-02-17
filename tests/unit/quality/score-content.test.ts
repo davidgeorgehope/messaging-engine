@@ -13,6 +13,9 @@ vi.mock('../../../src/services/quality/specificity.js', () => ({
 vi.mock('../../../src/services/quality/authenticity.js', () => ({
   analyzeAuthenticity: vi.fn().mockResolvedValue({ score: 8 }),
 }));
+vi.mock('../../../src/services/quality/narrative-arc.js', () => ({
+  analyzeNarrativeArc: vi.fn().mockResolvedValue({ score: 6 }),
+}));
 vi.mock('../../../src/services/quality/persona-critic.js', () => ({
   runPersonaCritics: vi.fn().mockResolvedValue([{ score: 7 }, { score: 9 }]),
 }));
@@ -25,6 +28,7 @@ import { analyzeSlop } from '../../../src/services/quality/slop-detector.js';
 import { analyzeVendorSpeak } from '../../../src/services/quality/vendor-speak.js';
 import { analyzeSpecificity } from '../../../src/services/quality/specificity.js';
 import { analyzeAuthenticity } from '../../../src/services/quality/authenticity.js';
+import { analyzeNarrativeArc } from '../../../src/services/quality/narrative-arc.js';
 import { runPersonaCritics } from '../../../src/services/quality/persona-critic.js';
 
 describe('score-content', () => {
@@ -35,6 +39,7 @@ describe('score-content', () => {
     vi.mocked(analyzeVendorSpeak).mockResolvedValue({ score: 4 } as any);
     vi.mocked(analyzeSpecificity).mockResolvedValue({ score: 7 } as any);
     vi.mocked(analyzeAuthenticity).mockResolvedValue({ score: 8 } as any);
+    vi.mocked(analyzeNarrativeArc).mockResolvedValue({ score: 6 } as any);
     vi.mocked(runPersonaCritics).mockResolvedValue([{ score: 7 }, { score: 9 }] as any);
   });
 
@@ -46,18 +51,20 @@ describe('score-content', () => {
         authenticityMin: 6,
         specificityMin: 6,
         personaMin: 6,
+        narrativeArcMin: 5,
       });
     });
   });
 
   describe('scoreContent', () => {
-    it('calls all 5 scorers', async () => {
+    it('calls all 6 scorers', async () => {
       await scoreContent('test content');
 
       expect(analyzeSlop).toHaveBeenCalledWith('test content');
       expect(analyzeVendorSpeak).toHaveBeenCalledWith('test content');
       expect(analyzeSpecificity).toHaveBeenCalledWith('test content', []);
       expect(analyzeAuthenticity).toHaveBeenCalledWith('test content');
+      expect(analyzeNarrativeArc).toHaveBeenCalledWith('test content');
       expect(runPersonaCritics).toHaveBeenCalledWith('test content');
     });
 
@@ -176,6 +183,7 @@ describe('score-content', () => {
       authenticityScore: 8,
       specificityScore: 7,
       personaAvgScore: 7,
+      narrativeArcScore: 7,
       slopAnalysis: {},
     };
 
@@ -231,6 +239,7 @@ describe('score-content', () => {
         authenticityScore: 6, // exactly at authenticityMin
         specificityScore: 6,  // exactly at specificityMin
         personaAvgScore: 6,   // exactly at personaMin
+        narrativeArcScore: 5, // exactly at narrativeArcMin
         slopAnalysis: {},
       };
       expect(checkQualityGates(boundaryScores, DEFAULT_THRESHOLDS)).toBe(true);
@@ -243,6 +252,7 @@ describe('score-content', () => {
         authenticityMin: 9,
         specificityMin: 9,
         personaMin: 9,
+        narrativeArcMin: 9,
       };
       expect(checkQualityGates(passingScores, strictThresholds)).toBe(false);
     });
@@ -255,17 +265,18 @@ describe('score-content', () => {
   });
 
   describe('totalQualityScore', () => {
-    it('calculates correctly: (10-slop) + (10-vendor) + auth + spec + persona', () => {
+    it('calculates correctly: (10-slop) + (10-vendor) + auth + spec + persona + arc', () => {
       const scores = {
         slopScore: 3,
         vendorSpeakScore: 4,
         authenticityScore: 8,
         specificityScore: 7,
         personaAvgScore: 7,
+        narrativeArcScore: 6,
         slopAnalysis: {},
       };
-      // (10-3) + (10-4) + 8 + 7 + 7 = 7 + 6 + 8 + 7 + 7 = 35
-      expect(totalQualityScore(scores)).toBe(35);
+      // (10-3) + (10-4) + 8 + 7 + 7 + 6 = 7 + 6 + 8 + 7 + 7 + 6 = 41
+      expect(totalQualityScore(scores)).toBe(41);
     });
 
     it('returns higher score for better content', () => {
@@ -275,6 +286,7 @@ describe('score-content', () => {
         authenticityScore: 9,
         specificityScore: 9,
         personaAvgScore: 9,
+        narrativeArcScore: 9,
         slopAnalysis: {},
       };
       const bad = {
@@ -283,22 +295,24 @@ describe('score-content', () => {
         authenticityScore: 2,
         specificityScore: 2,
         personaAvgScore: 2,
+        narrativeArcScore: 2,
         slopAnalysis: {},
       };
       expect(totalQualityScore(good)).toBeGreaterThan(totalQualityScore(bad));
     });
 
-    it('returns 50 for perfect scores', () => {
+    it('returns 60 for perfect scores', () => {
       const perfect = {
         slopScore: 0,
         vendorSpeakScore: 0,
         authenticityScore: 10,
         specificityScore: 10,
         personaAvgScore: 10,
+        narrativeArcScore: 10,
         slopAnalysis: {},
       };
-      // (10-0) + (10-0) + 10 + 10 + 10 = 50
-      expect(totalQualityScore(perfect)).toBe(50);
+      // (10-0) + (10-0) + 10 + 10 + 10 + 10 = 60
+      expect(totalQualityScore(perfect)).toBe(60);
     });
 
     it('returns 0 for worst scores', () => {
@@ -308,9 +322,10 @@ describe('score-content', () => {
         authenticityScore: 0,
         specificityScore: 0,
         personaAvgScore: 0,
+        narrativeArcScore: 0,
         slopAnalysis: {},
       };
-      // (10-10) + (10-10) + 0 + 0 + 0 = 0
+      // (10-10) + (10-10) + 0 + 0 + 0 + 0 = 0
       expect(totalQualityScore(worst)).toBe(0);
     });
   });

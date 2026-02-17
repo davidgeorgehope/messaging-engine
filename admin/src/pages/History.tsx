@@ -29,6 +29,9 @@ const ASSET_TYPE_LABELS: Record<string, string> = {
   social_hook: 'Social Hook',
   one_pager: 'One-Pager',
   email_copy: 'Email Copy',
+  messaging_template: 'Messaging Template',
+  narrative: 'Narrative',
+  storyboard: 'Storyboard',
 };
 
 export default function History() {

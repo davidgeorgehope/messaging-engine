@@ -174,6 +174,7 @@ app.get('/history', async (c) => {
         vendorSpeak: asset.vendorSpeakScore,
         specificity: asset.specificityScore,
         persona: asset.personaAvgScore,
+        narrativeArc: asset.narrativeArcScore,
       },
       status: asset.status,
       createdAt: asset.createdAt,

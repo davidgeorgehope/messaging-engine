@@ -36,7 +36,7 @@ const OOTB_PROFILES = [
 
 ## The Eye-Roll Test
 If a senior SRE reading this in a Slack channel would eye-roll, rewrite it.`,
-    scoringThresholds: JSON.stringify({ slopMax: 3, vendorSpeakMax: 3, authenticityMin: 8, specificityMin: 7, personaMin: 7 }),
+    scoringThresholds: JSON.stringify({ slopMax: 3, vendorSpeakMax: 3, authenticityMin: 8, specificityMin: 7, personaMin: 7, narrativeArcMin: 7 }),
     examplePhrases: JSON.stringify([
       'Has any SRE ever woken up at 3 a.m. wishing they had more dashboards? Probably not.',
       'Your existing OTel instrumentation works out of the box — no proprietary agents.',
@@ -73,7 +73,7 @@ If a senior SRE reading this in a Slack channel would eye-roll, rewrite it.`,
 - Reference real deployment scenarios
 - Compare approaches, not brands
 - Acknowledge trade-offs — practitioners respect honesty`,
-    scoringThresholds: JSON.stringify({ slopMax: 5, vendorSpeakMax: 6, authenticityMin: 6, specificityMin: 7, personaMin: 6 }),
+    scoringThresholds: JSON.stringify({ slopMax: 5, vendorSpeakMax: 6, authenticityMin: 6, specificityMin: 7, personaMin: 6, narrativeArcMin: 5 }),
     examplePhrases: JSON.stringify([
       'You\'re probably running 3-4 different tools right now — one for logs, one for metrics, one for traces, and maybe something else for profiling.',
       'The question isn\'t whether you need to consolidate — it\'s whether you can do it without losing the depth you need for real investigations.',
@@ -110,7 +110,7 @@ If a senior SRE reading this in a Slack channel would eye-roll, rewrite it.`,
 - This is the one voice where you can be bold
 - But bold ≠ empty — every bold claim earns its boldness through specificity
 - Think: conference keynote, not press release`,
-    scoringThresholds: JSON.stringify({ slopMax: 5, vendorSpeakMax: 7, authenticityMin: 5, specificityMin: 6, personaMin: 5 }),
+    scoringThresholds: JSON.stringify({ slopMax: 5, vendorSpeakMax: 7, authenticityMin: 5, specificityMin: 6, personaMin: 5, narrativeArcMin: 6 }),
     examplePhrases: JSON.stringify([
       'Live Logs and Prosper — AI-powered Streams transforms log chaos into your primary investigation signal.',
       'The promise of observability hasn\'t failed; its implementation is fundamentally broken.',
@@ -148,7 +148,7 @@ If a senior SRE reading this in a Slack channel would eye-roll, rewrite it.`,
 - Conference attendees want to learn, not be sold to
 - One-pagers need to earn attention in 30 seconds
 - Email copy needs to respect inbox fatigue — short, specific, valuable`,
-    scoringThresholds: JSON.stringify({ slopMax: 4, vendorSpeakMax: 5, authenticityMin: 7, specificityMin: 6, personaMin: 6 }),
+    scoringThresholds: JSON.stringify({ slopMax: 4, vendorSpeakMax: 5, authenticityMin: 7, specificityMin: 6, personaMin: 6, narrativeArcMin: 5 }),
     examplePhrases: JSON.stringify([
       'Think about a critical TLS certificate expiration — a simple oversight that can take down your entire service.',
       'This means the tedious effort of getting value from logging is significantly reduced. You no longer have to be a data janitor before you can be an investigator.',
