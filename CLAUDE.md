@@ -375,3 +375,37 @@ Generation prompts include the product name (extracted from insights) to prevent
 
 ### No Cron
 There is no scheduler/cron in the application. All work is triggered by API requests. There is a unit test (`no-cron.test.ts`) that enforces this.
+
+## Lessons & Hard-Won Rules
+
+These are patterns learned from the project's evolution. Violating them has caused real bugs.
+
+### Never Duplicate scoreContent()
+Authenticity scoring was faked as `10 - vendorSpeakScore` in 2 of 3 copy-pasted locations. Always import from `src/services/quality/score-content.ts`. Never copy the scoring logic.
+
+### Never Hardcode maxTokens Low
+`maxTokens: 50` on session naming caused 40% empty responses. Newer models have high limits; low hardcoded values cause silent truncation. Only set maxTokens when you need *more* than the 8192 default.
+
+### Outside-In Must Fail Hard
+The outside-in pipeline previously fell back silently to standard when no evidence was found. This produced mislabeled output. If no evidence after retries → throw error. Users should pick a different pipeline.
+
+### Product Docs Override Practitioner Voice
+Product doc layering in the outside-in pipeline was removed because it overrode the practitioner voice. Be cautious about mixing product positioning into practitioner-first content.
+
+### Grounded Search Is Flaky
+Gemini grounded search returns 200 OK with 0 results non-deterministically. Always retry (currently 5x). Same prompt returns rich results on retry.
+
+### Domain-Agnostic Prompts Only
+No hardcoded domain language (SRE, observability, etc.) in prompts. All domain context comes from extracted insights. The engine works for any product.
+
+### Process Stability: No File Watchers in Production
+PM2 with `tsx watch` caused EADDRINUSE crashes during in-flight Deep Research. Use `node dist/index.js` in production.
+
+### Compose, Don't Duplicate
+Workspace actions must compose from pipeline primitives (`generateAndScore`, `refinementLoop`, `storeVariant`). The one exception is `runAdversarialLoopAction` which has unique "elevation mode" logic.
+
+### Evidence Retries Are Layered
+Grounded search: 5x retry on empty. Community deep research: 3x full retry if evidence level is `product-only`. These are separate retry loops at different levels.
+
+### Test Profile Guard
+`model-profile-guard.test.ts` fails if tests hit production models. Always run tests with `MODEL_PROFILE=test`. Config auto-detects Vitest and defaults to test.

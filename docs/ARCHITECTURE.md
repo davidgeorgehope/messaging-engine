@@ -292,3 +292,88 @@ User creates session (POST /api/workspace/sessions)
 
 **Integration** (`tests/integration/`):
 - `naming-gemini.test.ts` — Session naming with real Gemini API
+
+## Design Decisions & Evolution
+
+This section captures the key design decisions and the reasoning behind them, drawn from the project's commit history. Understanding *why* things are the way they are prevents repeating past mistakes.
+
+### The God File Extraction (`a1d9071`, `6e4f7b4`)
+
+`src/api/generate.ts` started as a monolithic "god file" containing all pipeline logic, prompt builders, evidence gathering, and variant storage. It was extracted into `src/services/pipeline/` modules (orchestrator, evidence, prompts, per-pipeline files). Workspace actions were then refactored to compose from these shared primitives rather than duplicating logic. The key insight: **single source of truth for generate+score+refine**, reused by both pipelines and workspace actions.
+
+### Authenticity Scoring Was Faked (`b7aaebd`)
+
+A critical bug: `scoreContent()` was copy-pasted into 3 locations, and 2 of them faked the authenticity score as `Math.max(0, 10 - vendorSpeakScore)` instead of calling the real `analyzeAuthenticity()` scorer. This was caught and fixed by creating a single shared `score-content.ts` module. **Lesson**: never duplicate scoring logic. The shared module now runs all 5 real scorers in parallel with individual fallbacks.
+
+### Outside-In: Fail Hard, No Fallback (`0516c3e`, `9489b8e`)
+
+The outside-in pipeline originally fell back to the standard pipeline when no community evidence was found. This silently produced standard-pipeline output labeled as "outside-in," destroying the pipeline's purpose. The fix: **fail hard with an explicit error** when community evidence retries are exhausted. If the user wants standard pipeline behavior, they should select the standard pipeline. The outside-in pipeline's contract is: real community evidence or nothing.
+
+### Product Doc Layering Removed from Outside-In (`5f0137c`)
+
+Step 6 of the outside-in pipeline ("layer product specifics") was causing the uploaded product doc to override the practitioner voice — the exact thing outside-in is designed to avoid. It was removed entirely. The enriched draft flows directly from competitive enrichment into refinement, keeping practitioner pain front and center.
+
+### Evidence Grounding: Naive Scrapers → AI Discovery → Deep Research (`c19fb5a`, `52a614b`)
+
+The evidence system went through 3 generations:
+1. **Direct API scrapers** (Reddit, HN, SO, GitHub, Discourse) — fragile, rate-limited, keyword-dependent
+2. **Gemini grounded search** — AI-powered but still keyword-based, returned empty results non-deterministically
+3. **Gemini Deep Research** — single call searches all sources natively, eliminates intermediate keyword extraction
+
+The scrapers were deleted (-1,109 lines). Deep Research is now the sole evidence source. Grounded search retries 5x on empty results (the API is flaky — same prompt returns rich results on retry).
+
+### Domain-Agnostic Prompts (`4d976b9`)
+
+All prompts originally had hardcoded observability/SRE language baked in. This was replaced with domain-agnostic language that infers the product domain from extracted insights. The engine now works for any product domain.
+
+### Dynamic Banned Words (`7afe971`, `0eef476`)
+
+The banned words system evolved from a static hardcoded list → dynamic per-voice generation via Gemini Flash. The LLM generates 15-20 voice/domain-specific banned words, cached per `voiceId:domain`. The static list is kept as fallback (3x retry with backoff before falling back).
+
+### maxTokens Truncation Bugs (`ac61fec`, `714c021`)
+
+Hardcoded `maxTokens: 50` on session naming caused Gemini to truncate to 0 tokens 40% of the time. More broadly, low hardcoded `maxTokens` values across 8 call sites caused silent truncation with newer models. Fix: **never hardcode maxTokens unless you need more than the default**. Claude still requires explicit `max_tokens` so it uses 16384.
+
+### Async Background Jobs (`7399146`)
+
+All 7 workspace actions originally ran synchronously, causing Cloudflare 100s timeout for long operations (especially competitive deep dive and community check which involve Deep Research). Solution: `action_jobs` table with fire-and-forget execution. Frontend polls a status endpoint every 3s.
+
+### PM2: tsx watch → node dist (`ac61fec`)
+
+PM2 was originally configured with `tsx watch`, which caused EADDRINUSE crashes when file-watching restarts killed in-flight Deep Research operations. Switched to `node dist/index.js` — more stable for a production process that runs long async operations.
+
+### Chat Switched from Claude to Gemini (`81fd2c9`)
+
+Workspace chat originally used Claude for streaming responses. This was switched to Gemini Pro to keep the entire system on a single AI provider by default. Claude remains available as an opt-in override for generation.
+
+### Model Profile System (`87981d0`, `34aaa9b`)
+
+Created to prevent accidental production model spend during testing. `MODEL_PROFILE=test` swaps all models to Gemini 2.5 Flash. A guard test (`model-profile-guard.test.ts`) fails if tests run against production models. The config auto-detects the Vitest environment and defaults to test profile.
+
+### Split Research Pipeline Removed (`a622121`)
+
+A "split-research" pipeline was removed as redundant with the standard pipeline. This left 4 pipelines (standard, outside-in, adversarial, multi-perspective). The straight-through pipeline was added later as the 5th.
+
+### Sequential DAG Pipelines (`a622121`, `aa698ec`)
+
+Pipelines were refactored from parallel to sequential DAGs — each step feeds the next. Community research findings feed into competitive research prompts. Only multi-perspective retains parallel generation (3 perspectives) by design.
+
+### Tiered Insights Replace Raw Truncation (`c8f4cff`)
+
+Every pipeline was independently truncating raw product docs (often just the executive summary / vendor positioning). Replaced with `extractInsights()` running once per job and 4 tiered formatters providing the right level of context to each stage: discovery (~150 chars), research (~1-2K), generation (~2-3K), scoring (~1-2K). This eliminated vendor framing from community search and competitive research prompts.
+
+### LLM-Based Spirit Validation (`9bd9618`)
+
+E2E tests don't just check that pipelines complete — they use Gemini to score whether the output matches the pipeline's *intent*:
+- Outside-in: must be practitioner-driven, low product doc influence
+- Standard: must have strong product PoV and thesis
+- Adversarial: must feel battle-tested, acknowledge weaknesses
+- Multi-perspective: must cover multiple distinct angles
+
+### No Cron (`tests/unit/architecture/no-cron.test.ts`)
+
+There is no scheduler/cron in the application. A unit test enforces this by scanning source files. All work is triggered by API requests. The previous architecture had node-cron for discovery scheduling, but this was removed when the system shifted to an on-demand workspace model.
+
+### Dead Code Sweep (`81fd2c9`)
+
+A major cleanup deleted 25 dead files: 7 frontend pages, 6 admin routes, 11 services, and 18 dead API client methods. The discovery/scheduling/cron pipeline was the primary casualty — replaced by the on-demand workspace model where users create sessions and trigger generation explicitly.
