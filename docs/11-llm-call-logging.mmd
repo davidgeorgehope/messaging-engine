@@ -1,0 +1,6 @@
+graph LR
+    A[Any LLM Call] --> B["logCall() fire-and-forget"]
+    B --> C[llm_calls table]
+    D["withLLMContext()"] --> E[AsyncLocalStorage]
+    E --> F["Auto-injects sessionId, jobId, purpose"]
+    F --> B
