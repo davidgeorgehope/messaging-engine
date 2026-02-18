@@ -65,7 +65,7 @@ describe('score-content', () => {
       expect(analyzeSpecificity).toHaveBeenCalledWith('test content', []);
       expect(analyzeAuthenticity).toHaveBeenCalledWith('test content');
       expect(analyzeNarrativeArc).toHaveBeenCalledWith('test content');
-      expect(runPersonaCritics).toHaveBeenCalledWith('test content');
+      expect(runPersonaCritics).toHaveBeenCalledWith('test content', undefined);
     });
 
     it('calls analyzeAuthenticity (not faked from vendor-speak)', async () => {
@@ -173,6 +173,18 @@ describe('score-content', () => {
 
       const result = await scoreContent('content');
       expect(result.personaAvgScore).toBe(5);
+    });
+
+    it('forwards personaContext to runPersonaCritics when provided', async () => {
+      const personaContext = {
+        domain: 'security',
+        category: 'SIEM',
+        targetPersonas: ['Security Analyst'],
+        painPointsAddressed: ['Alert fatigue'],
+        productName: 'TestProduct',
+      };
+      await scoreContent('test content', [], personaContext);
+      expect(runPersonaCritics).toHaveBeenCalledWith('test content', personaContext);
     });
   });
 

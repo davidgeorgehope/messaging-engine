@@ -1,22 +1,8 @@
 import { getModelForTask } from '../../config.js';
-import { generateWithGemini } from '../ai/clients.js';
-import { config } from '../../config.js';
+import { generateJSON } from '../ai/clients.js';
 import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('quality:grounding-validator');
-
-// Patterns that indicate fabricated community references
-const FABRICATION_PATTERNS = [
-  /as one [\w\s]+ on r\/\w+/gi,
-  /as one [\w\s]+ (noted|pointed out|mentioned|shared|put it|observed|explained|wrote)/gi,
-  /practitioners (report|say|note|observe|confirm|agree|mention|describe)/gi,
-  /community (sentiment|consensus|feedback|discussions?) (suggests?|indicates?|shows?|confirms?|reveals?)/gi,
-  /"[^"]{10,}" — (Reddit|Hacker News|Stack Overflow|GitHub|r\/)/gi,
-  /according to (practitioners|engineers|developers|teams|users) (on|in|across|from) /gi,
-  /a (senior |lead |staff )?(engineer|developer|SRE|DevOps|practitioner|architect) (on|in|at) (Reddit|HN|Hacker News|Stack Overflow)/gi,
-  /forum (posts?|threads?|discussions?) (indicate|show|suggest|reveal|confirm)/gi,
-  /in (a |one )?(recent |popular )?(Reddit|HN|Hacker News|Stack Overflow|GitHub) (thread|post|discussion|comment)/gi,
-];
 
 export interface GroundingValidationResult {
   hasFabricationPatterns: boolean;
@@ -27,77 +13,81 @@ export interface GroundingValidationResult {
 }
 
 /**
- * Check generated content for fabrication patterns.
- * If fabrication found AND evidence level is 'product-only', strip fabrications via LLM.
+ * Check generated content for fabricated community references.
+ * - For 'strong' or 'partial' evidence: skip check (content is grounded)
+ * - For 'product-only': single LLM call to detect AND strip fabrications
+ * - Fails open on error: returns fabricationStripped: false
  */
 export async function validateGrounding(
   content: string,
   evidenceLevel: 'strong' | 'partial' | 'product-only',
 ): Promise<GroundingValidationResult> {
-  const matches: string[] = [];
-
-  for (const pattern of FABRICATION_PATTERNS) {
-    // Reset regex state for global patterns
-    pattern.lastIndex = 0;
-    let match;
-    while ((match = pattern.exec(content)) !== null) {
-      matches.push(match[0]);
-    }
-  }
-
-  const hasFabricationPatterns = matches.length > 0;
-
-  if (!hasFabricationPatterns || evidenceLevel !== 'product-only') {
+  // Content backed by real evidence — no fabrication check needed
+  if (evidenceLevel === 'strong' || evidenceLevel === 'partial') {
     return {
-      hasFabricationPatterns,
-      fabricationCount: matches.length,
-      matchedPatterns: matches,
+      hasFabricationPatterns: false,
+      fabricationCount: 0,
+      matchedPatterns: [],
       fabricationStripped: false,
     };
   }
 
-  // Fabrication found AND no real evidence — strip it
-  logger.warn('Fabrication patterns detected in product-only content, stripping', {
-    fabricationCount: matches.length,
-    patterns: matches.slice(0, 5),
-  });
-
+  // product-only: LLM-based fabrication detection + stripping
   try {
-    const strippingPrompt = `Remove all fabricated practitioner quotes and community references from this content. The content was generated WITHOUT any real community evidence, so any references to Reddit threads, practitioner quotes, community sentiment, forum discussions, etc. are fabricated.
+    const prompt = `Analyze the following content that was generated WITHOUT any real community evidence. Identify any fabricated community references — quotes attributed to practitioners, references to forum discussions, claims about community sentiment, or citations of specific posts on Reddit, Hacker News, Stack Overflow, GitHub, or other community sites.
 
-## Content to Clean
+## Content to Analyze
 ${content}
 
-## Rules
-1. Remove or rewrite any sentence that references community discussions, practitioner quotes, Reddit/HN/SO threads, or "engineers say..."
-2. Replace fabricated social proof with product-doc-grounded claims or mark as [Needs community validation]
-3. Keep all factual product claims and genuine insights
-4. Maintain the same structure and format
-5. Do NOT add new fabricated references
+## Instructions
+1. Find all fabricated community references (fake quotes, invented forum threads, fabricated practitioner testimonials, made-up community sentiment claims)
+2. List each fabricated reference as a short description
+3. Produce a cleaned version of the content with fabrications removed or replaced with product-doc-grounded claims or "[Needs community validation]" markers
+4. Keep all factual product claims and genuine insights
+5. Maintain the same structure and format
 
-Output ONLY the cleaned content.`;
+Return JSON:
+{
+  "fabricatedReferences": ["<short description of each fabricated reference found>"],
+  "cleanedContent": "<the content with fabrications removed/replaced>"
+}`;
 
-    const response = await generateWithGemini(strippingPrompt, {
+    const response = await generateJSON<{
+      fabricatedReferences: string[];
+      cleanedContent: string;
+    }>(prompt, {
       model: getModelForTask('pro'),
       temperature: 0.3,
+      retryOnParseError: true,
+      maxParseRetries: 1,
     });
 
+    const { fabricatedReferences, cleanedContent } = response.data;
+    const hasFabrications = fabricatedReferences.length > 0;
+
+    if (hasFabrications) {
+      logger.warn('Fabrication patterns detected in product-only content, stripping', {
+        fabricationCount: fabricatedReferences.length,
+        patterns: fabricatedReferences.slice(0, 5),
+      });
+    }
+
     return {
-      hasFabricationPatterns: true,
-      fabricationCount: matches.length,
-      matchedPatterns: matches,
-      strippedContent: response.text,
-      fabricationStripped: true,
+      hasFabricationPatterns: hasFabrications,
+      fabricationCount: fabricatedReferences.length,
+      matchedPatterns: fabricatedReferences,
+      strippedContent: hasFabrications ? cleanedContent : undefined,
+      fabricationStripped: hasFabrications,
     };
   } catch (error) {
-    logger.error('Fabrication stripping failed', {
+    logger.error('Fabrication detection failed, failing open', {
       error: error instanceof Error ? error.message : String(error),
     });
-    // Return original content with warning
+    // Fail open — return original content without stripping
     return {
-      hasFabricationPatterns: true,
-      fabricationCount: matches.length,
-      matchedPatterns: matches,
+      hasFabricationPatterns: false,
+      fabricationCount: 0,
+      matchedPatterns: [],
       fabricationStripped: false,
     };
   }

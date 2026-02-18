@@ -9,6 +9,7 @@ import { createLogger } from '../../utils/logger.js';
 import { generateId } from '../../utils/hash.js';
 import { deslop } from '../../services/quality/slop-detector.js';
 import { scoreContent, checkQualityGates as checkGates, totalQualityScore, type ScoreResults, type ScorerHealth } from '../../services/quality/score-content.js';
+import type { PersonaScoringContext } from '../../services/quality/persona-critic.js';
 import { validateGrounding } from '../../services/quality/grounding-validator.js';
 import { PUBLIC_GENERATION_PRIORITY_ID } from '../../db/seed.js';
 import type { AssetType } from '../../services/generation/types.js';
@@ -136,6 +137,7 @@ export async function generateAndScore(
   scoringContext: string,
   thresholds: ScoringThresholds,
   assetType?: AssetType,
+  personaContext?: PersonaScoringContext,
 ): Promise<GenerateAndScoreResult> {
   const temperature = assetType ? ASSET_TYPE_TEMPERATURE[assetType] ?? 0.7 : 0.7;
   const response = await generateContent(userPrompt, {
@@ -143,7 +145,7 @@ export async function generateAndScore(
     temperature,
   }, model);
 
-  const scores = await scoreContent(response.text, [scoringContext]);
+  const scores = await scoreContent(response.text, [scoringContext], personaContext);
   const passesGates = checkGates(scores, thresholds);
 
   return { content: response.text, scores, passesGates };
@@ -163,8 +165,9 @@ export async function refinementLoop(
   model: string,
   maxIterations: number = 3,
   productName?: string,
+  personaContext?: PersonaScoringContext,
 ): Promise<GenerateAndScoreResult> {
-  let scores = await scoreContent(content, [scoringContext]);
+  let scores = await scoreContent(content, [scoringContext], personaContext);
   let wasDeslopped = false;
 
   if (scores.scorerHealth.failed.length >= 2) {
@@ -197,7 +200,7 @@ export async function refinementLoop(
         temperature: 0.5,
       }, model);
 
-      const newScores = await scoreContent(refined.text, [scoringContext]);
+      const newScores = await scoreContent(refined.text, [scoringContext], personaContext);
 
       if (totalQualityScore(newScores) <= totalQualityScore(scores)) {
         logger.info('Refinement plateau reached', { iteration: i, assetType, voice: voice.name });

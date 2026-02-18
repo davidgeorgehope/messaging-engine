@@ -7,7 +7,7 @@ import { analyzeVendorSpeak } from './vendor-speak.js';
 import { analyzeSpecificity } from './specificity.js';
 import { analyzeAuthenticity } from './authenticity.js';
 import { analyzeNarrativeArc } from './narrative-arc.js';
-import { runPersonaCritics } from './persona-critic.js';
+import { runPersonaCritics, type PersonaScoringContext } from './persona-critic.js';
 import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('quality:score-content');
@@ -38,7 +38,7 @@ export const DEFAULT_THRESHOLDS = {
   narrativeArcMin: 5,
 };
 
-export async function scoreContent(content: string, productDocs: string[] = []): Promise<ScoreResults> {
+export async function scoreContent(content: string, productDocs: string[] = [], personaContext?: PersonaScoringContext): Promise<ScoreResults> {
   const failed: string[] = [];
 
   const [slopAnalysis, vendorAnalysis, specificityAnalysis, authenticityAnalysis, narrativeArcAnalysis, personaResults] = await Promise.all([
@@ -47,7 +47,7 @@ export async function scoreContent(content: string, productDocs: string[] = []):
     analyzeSpecificity(content, productDocs).catch((err) => { logger.warn('Specificity analysis failed, using fallback', { error: String(err) }); failed.push('specificity'); return { score: 5 }; }),
     analyzeAuthenticity(content).catch((err) => { logger.warn('Authenticity analysis failed, using fallback', { error: String(err) }); failed.push('authenticity'); return { score: 5 }; }),
     analyzeNarrativeArc(content).catch((err) => { logger.warn('Narrative arc analysis failed, using fallback', { error: String(err) }); failed.push('narrativeArc'); return { score: 5 }; }),
-    runPersonaCritics(content).catch((err) => { logger.warn('Persona critics failed, using fallback', { error: String(err) }); failed.push('persona'); return []; }),
+    runPersonaCritics(content, personaContext).catch((err) => { logger.warn('Persona critics failed, using fallback', { error: String(err) }); failed.push('persona'); return []; }),
   ]);
 
   const personaAvg = personaResults.length > 0

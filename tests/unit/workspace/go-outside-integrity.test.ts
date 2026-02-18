@@ -93,10 +93,10 @@ describe('evidence grounding in pipeline modules', () => {
     expect(source).toContain('ONLY reference practitioners and quotes from the "Verified Community Evidence" section');
   });
 
-  it('outside-in pipeline falls back to standard when no evidence', () => {
+  it('outside-in pipeline throws when no evidence (no silent fallback)', () => {
     const source = readFileSync(outsideInPath, 'utf-8');
-    expect(source).toContain("Outside-in pipeline requires community evidence but none was found");
-    expect(source).toMatch(/return runStandardPipeline\(jobId, inputs\)/);
+    expect(source).toContain("Outside-in pipeline requires real community evidence");
+    expect(source).toContain("throw new Error");
   });
 
   it('default generation model is Gemini (not Claude)', () => {
@@ -123,9 +123,10 @@ describe('evidence grounding in pipeline modules', () => {
     expect(source).toMatch(/evidenceLevel:\s*evidence\?\.evidenceLevel/);
   });
 
-  it('Standard and Adversarial use sequential research, Multi-Perspective uses parallel perspectives', () => {
+  it('Multi-Perspective generates 3 perspectives in parallel via Promise.all', () => {
     const source = readFileSync(multiPerspectivePath, 'utf-8');
-    const parallelPattern = /Promise\.all\(\[\s*\n?\s*runCommunityDeepResearch/g;
+    // Multi-perspective runs 3 perspective generations in parallel
+    const parallelPattern = /Promise\.all\(\[\s*\n?\s*generateContent/g;
     const matches = source.match(parallelPattern);
     expect(matches?.length).toBe(1);
   });
@@ -139,17 +140,19 @@ describe('grounding-validator.ts', () => {
     expect(source).toMatch(/export\s+async\s+function\s+validateGrounding/);
   });
 
-  it('detects common fabrication patterns', () => {
+  it('uses LLM-based fabrication detection (domain-agnostic)', () => {
     const source = readFileSync(validatorPath, 'utf-8');
-    expect(source).toContain('FABRICATION_PATTERNS');
-    expect(source).toContain('as one');
-    expect(source).toContain('practitioners');
-    expect(source).toContain('community sentiment');
+    expect(source).toContain('generateJSON');
+    expect(source).toContain('fabricatedReferences');
+    // No hardcoded regex patterns
+    expect(source).not.toContain('FABRICATION_PATTERNS');
+    expect(source).not.toContain('SRE|DevOps');
   });
 
-  it('only strips fabrications when evidence level is product-only', () => {
+  it('skips check for grounded content, only checks product-only', () => {
     const source = readFileSync(validatorPath, 'utf-8');
-    expect(source).toContain("evidenceLevel !== 'product-only'");
+    expect(source).toContain("evidenceLevel === 'strong'");
+    expect(source).toContain("evidenceLevel === 'partial'");
   });
 });
 

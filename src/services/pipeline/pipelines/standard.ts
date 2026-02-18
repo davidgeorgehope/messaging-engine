@@ -85,8 +85,8 @@ export async function runStandardPipeline(jobId: string, inputs: JobInputs): Pro
         : buildUserPrompt(existingMessaging, prompt, researchContext, template, assetType, insights, evidence.evidenceLevel, insights.productName);
 
       try {
-        const initial = await generateAndScore(userPrompt, systemPrompt, selectedModel, scoringContext, thresholds, assetType);
-        const result = await refinementLoop(initial.content, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel, 3, insights.productName);
+        const initial = await generateAndScore(userPrompt, systemPrompt, selectedModel, scoringContext, thresholds, assetType, insights);
+        const result = await refinementLoop(initial.content, scoringContext, thresholds, voice, assetType, systemPrompt, selectedModel, 3, insights.productName, insights);
         await storeVariant(jobId, assetType, voice, result.content, result.scores, result.passesGates, prompt, evidence, { systemPrompt, userPrompt });
       } catch (error) {
         logger.error('Failed to generate variant', {

@@ -315,6 +315,7 @@ export async function runRegenerateAction(sessionId: string, assetType: string):
     scoringContext,
     thresholds,
     assetType as AssetType,
+    insights,
   );
 
   let finalContent = genResult.content;
@@ -338,6 +339,7 @@ export async function runRegenerateAction(sessionId: string, assetType: string):
       selectedModel,
       1, // single refinement iteration for workspace regeneration
       insights.productName,
+      insights,
     );
     finalContent = refined.content;
     scores = refined.scores;
@@ -528,7 +530,7 @@ export async function runCompetitiveDeepDiveAction(sessionId: string, assetType:
     temperature: 0.5,
   });
 
-  const scores = await scoreContent(enriched.text);
+  const scores = await scoreContent(enriched.text, [], insights);
   const thresholds = await loadSessionThresholds(sessionId);
 
   const version = await createVersionAndActivate(sessionId, assetType, enriched.text, 'competitive_dive', {
@@ -609,7 +611,7 @@ Output ONLY the rewritten content.`;
     temperature: 0.5,
   });
 
-  const scores = await scoreContent(rewritten.text);
+  const scores = await scoreContent(rewritten.text, [], insights);
   const thresholds = await loadSessionThresholds(sessionId);
 
   const version = await createVersionAndActivate(sessionId, assetType, rewritten.text, 'community_check', {
@@ -728,10 +730,10 @@ Output ONLY the synthesized content. No meta-commentary.`;
 
   // Score all 4, keep the best
   const [empathyScores, competitiveScores, thoughtScores, synthesizedScores] = await Promise.all([
-    scoreContent(empathyRes.text, [scoringContext]),
-    scoreContent(competitiveRes.text, [scoringContext]),
-    scoreContent(thoughtRes.text, [scoringContext]),
-    scoreContent(synthesizedRes.text, [scoringContext]),
+    scoreContent(empathyRes.text, [scoringContext], insights),
+    scoreContent(competitiveRes.text, [scoringContext], insights),
+    scoreContent(thoughtRes.text, [scoringContext], insights),
+    scoreContent(synthesizedRes.text, [scoringContext], insights),
   ]);
 
   const candidates = [

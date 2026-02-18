@@ -41,7 +41,7 @@ export async function runStraightThroughPipeline(jobId: string, inputs: JobInput
       const thresholds = parseScoringThresholds(voice.scoringThresholds);
 
       try {
-        const scores = await scoreContent(existingMessaging, [scoringContext]);
+        const scores = await scoreContent(existingMessaging, [scoringContext], insights);
         const passesGates = checkGates(scores, thresholds);
 
         await storeVariant(jobId, assetType, voice, existingMessaging, scores, passesGates, prompt);
