@@ -1,8 +1,8 @@
-// E2E tests for all 5 pipelines using MODEL_PROFILE=test (Gemini Flash for everything)
+// E2E tests for all 5 pipelines using MODEL_PROFILE=economy (Gemini Flash for everything)
 // Run with: npm run test:e2e
 
-// Set test profile BEFORE any imports
-process.env.MODEL_PROFILE = 'test';
+// Set economy profile BEFORE any imports
+process.env.MODEL_PROFILE = 'economy';
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { eq } from 'drizzle-orm';
@@ -101,7 +101,7 @@ describe('All 5 Pipelines E2E (Flash model profile)', () => {
     TEST_PRODUCT_DOCS = parsed.text;
     console.log(`Loaded One Workflow PDF: ${TEST_PRODUCT_DOCS.length} chars`);
 
-    expect(getActiveModelProfile()).toBe('test');
+    expect(getActiveModelProfile()).toBe('economy');
     console.log(`\n🛡️  MODEL_PROFILE=${getActiveModelProfile()} — all calls using: ${getModelForTask('flash')}\n`);
     await initializeDatabase();
 

@@ -1,6 +1,6 @@
 // Test: community evidence search should NEVER return empty for known problem domains
-// Set test profile BEFORE any imports
-process.env.MODEL_PROFILE = 'test';
+// Set economy profile BEFORE any imports
+process.env.MODEL_PROFILE = 'economy';
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { runCommunityDeepResearch } from '../../src/services/pipeline/evidence.js';

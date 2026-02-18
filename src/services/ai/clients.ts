@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { GoogleGenAI } from '@google/genai';
-import { config, getModelForTask, isTestProfile } from '../../config.js';
+import { config, getModelForTask } from '../../config.js';
 import { createLogger } from '../../utils/logger.js';
 import { withRetry, withTimeout, createRateLimiter } from '../../utils/retry.js';
 import { logCall } from './call-logger.js';
@@ -759,7 +759,7 @@ export interface GeneratedImage {
 export async function generateImage(
   prompt: string,
 ): Promise<GeneratedImage> {
-  const model = 'gemini-2.0-flash-exp';
+  const model = 'gemini-2.5-flash-image';
 
   await geminiFlashRateLimiter.acquire();
 

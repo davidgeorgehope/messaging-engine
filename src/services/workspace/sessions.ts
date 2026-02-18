@@ -33,7 +33,7 @@ export interface CreateSessionInput {
   focusInstructions?: string;
   pipeline?: string;
   existingMessaging?: string;
-  modelProfile?: 'production' | 'test';
+  modelProfile?: 'economy' | 'premium';
 }
 
 export async function createSession(userId: string, data: CreateSessionInput) {
@@ -185,8 +185,8 @@ export async function startSessionGeneration(sessionId: string) {
       prompt,
       voiceProfileIds,
       assetTypes,
-      model: getModelForTask(sessionMeta.modelProfile === 'test' ? 'flash' : 'pro'),
-      modelProfile: sessionMeta.modelProfile || 'test',
+      model: getModelForTask(sessionMeta.modelProfile === 'economy' ? 'flash' : 'pro'),
+      modelProfile: sessionMeta.modelProfile || 'economy',
       pipeline,
     }),
     startedAt: now,
@@ -201,7 +201,7 @@ export async function startSessionGeneration(sessionId: string) {
     .run();
 
   // Fire-and-forget the generation pipeline — set model profile for this job
-  const jobModelProfile = sessionMeta.modelProfile || 'test';
+  const jobModelProfile = sessionMeta.modelProfile || 'economy';
   process.env.MODEL_PROFILE = jobModelProfile;
   logger.info('Starting generation with model profile', { jobId, modelProfile: jobModelProfile });
   runPublicGenerationJob(jobId)
@@ -214,7 +214,7 @@ export async function startSessionGeneration(sessionId: string) {
       await createInitialVersions(sessionId, jobId).catch(err => {
         logger.warn('Failed to create initial versions', { sessionId, jobId, error: err instanceof Error ? err.message : String(err) });
       });
-      process.env.MODEL_PROFILE = 'test';
+      process.env.MODEL_PROFILE = 'economy';
       logger.info('Session generation completed', { sessionId, jobId, modelProfile: jobModelProfile });
     })
     .catch(async (error) => {

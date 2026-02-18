@@ -22,7 +22,7 @@ This is the **PMM Messaging Engine**, an automated system that converts practiti
 
 1. **SQLite over PostgreSQL**: Single-file database for simplicity. This is an internal PMM tool, not a high-concurrency service.
 
-2. **Model Profile System**: `MODEL_PROFILE` env var switches all models between production (Gemini 3) and test (all Gemini 2.5 Flash). See `getModelForTask()` in `config.ts`.
+2. **Model Profile System**: `MODEL_PROFILE` env var switches all models between premium (Gemini 3) and economy (all Gemini 2.5 Flash). See `getModelForTask()` in `config.ts`.
 
 3. **JSON in TEXT columns**: Complex nested data stored as JSON-serialized TEXT in SQLite. Always `JSON.parse()` on read, `JSON.stringify()` on write.
 
@@ -68,10 +68,10 @@ See `DATABASE.md` for complete schema details.
 
 ## Model Profile System
 
-Controlled by `MODEL_PROFILE` env var (`'production'` | `'test'`).
+Controlled by `MODEL_PROFILE` env var (`'economy'` | `'premium'`).
 
-| Task | Production Model | Test Model |
-|------|-----------------|------------|
+| Task | Premium Model | Economy Model |
+|------|--------------|---------------|
 | flash | gemini-3-flash-preview | gemini-2.5-flash |
 | pro | gemini-3-pro-preview | gemini-2.5-flash |
 | deepResearch | deep-research-pro-preview | gemini-2.5-flash |
@@ -341,7 +341,7 @@ cd admin && npm install && npm run build && cd ..
 ./deploy.sh
 
 # Tests
-npm test                           # unit tests (MODEL_PROFILE=test)
+npm test                           # unit tests (MODEL_PROFILE=economy)
 npm run test:e2e                   # e2e tests (5min timeout)
 ```
 
@@ -356,7 +356,7 @@ npm run test:e2e                   # e2e tests (5min timeout)
 | `JWT_SECRET` | Yes | JWT signing secret (must change in production) |
 | `ADMIN_USERNAME` | Yes | Default admin username |
 | `ADMIN_PASSWORD` | Yes | Default admin password |
-| `MODEL_PROFILE` | No (production) | `'production'` or `'test'` |
+| `MODEL_PROFILE` | No (economy) | `'economy'` or `'premium'` |
 | `NODE_ENV` | No (development) | Environment mode |
 
 ## Important Conventions
@@ -407,5 +407,5 @@ Workspace actions must compose from pipeline primitives (`generateAndScore`, `re
 ### Evidence Retries Are Layered
 Grounded search: 5x retry on empty. Community deep research: 3x full retry if evidence level is `product-only`. These are separate retry loops at different levels.
 
-### Test Profile Guard
-`model-profile-guard.test.ts` fails if tests hit production models. Always run tests with `MODEL_PROFILE=test`. Config auto-detects Vitest and defaults to test.
+### Economy Profile Guard
+`model-profile-guard.test.ts` fails if tests hit premium models. Always run tests with `MODEL_PROFILE=economy`. Config auto-detects Vitest and defaults to economy.

@@ -1,12 +1,11 @@
 import { GoogleGenAI } from '@google/genai';
-import { config, getModelForTask, isTestProfile } from '../../config.js';
+import { config, getModelForTask } from '../../config.js';
 import { generateWithGeminiGroundedSearch } from '../ai/clients.js';
 import { createLogger } from '../../utils/logger.js';
 import type { SearchResult } from '../ai/types.js';
 
 const logger = createLogger('research:deep-research');
 
-const DEEP_RESEARCH_AGENT = getModelForTask('deepResearch');
 const POLL_INTERVAL_MS = config.deepResearch.pollIntervalMs;
 const MAX_DURATION_MS = config.deepResearch.timeoutMs;
 
@@ -15,12 +14,13 @@ function getClient(): GoogleGenAI {
 }
 
 export async function createDeepResearchInteraction(prompt: string): Promise<string> {
-  // In test profile, deep research agent doesn't support Flash — use grounded search fallback
-  if (isTestProfile()) {
-    logger.info('Test profile: using grounded search fallback instead of Deep Research');
+  // Check model capability: only deep-research-* models support the agent API
+  const deepResearchModel = getModelForTask('deepResearch');
+  if (!deepResearchModel.startsWith('deep-research')) {
+    logger.info('Model does not support Deep Research agent API, using grounded search fallback', { model: deepResearchModel });
     const result = await generateWithGeminiGroundedSearch(prompt);
-    const syntheticId = `dr-test-${Date.now().toString(36)}`;
-    _testResults.set(syntheticId, { text: result.text, sources: result.sources });
+    const syntheticId = `dr-fallback-${Date.now().toString(36)}`;
+    _fallbackResults.set(syntheticId, { text: result.text, sources: result.sources });
     return syntheticId;
   }
 
@@ -29,7 +29,7 @@ export async function createDeepResearchInteraction(prompt: string): Promise<str
 
   const interaction = await (client as any).interactions.create({
     input: prompt,
-    agent: DEEP_RESEARCH_AGENT,
+    agent: deepResearchModel,
     background: true,
     store: true,
   });
@@ -38,17 +38,17 @@ export async function createDeepResearchInteraction(prompt: string): Promise<str
   return interaction.id;
 }
 
-// Cache for test profile grounded search results
-const _testResults = new Map<string, { text: string; sources: SearchResult[] }>();
+// Cache for grounded search fallback results (when model doesn't support Deep Research agent)
+const _fallbackResults = new Map<string, { text: string; sources: SearchResult[] }>();
 
 export async function pollInteractionUntilComplete(
   interactionId: string,
   onProgress?: (status: string) => void,
 ): Promise<{ text: string; sources: SearchResult[] }> {
-  // Return cached test profile result immediately
-  if (_testResults.has(interactionId)) {
-    const cached = _testResults.get(interactionId)!;
-    _testResults.delete(interactionId);
+  // Return cached fallback result immediately
+  if (_fallbackResults.has(interactionId)) {
+    const cached = _fallbackResults.get(interactionId)!;
+    _fallbackResults.delete(interactionId);
     onProgress?.('completed');
     return cached;
   }

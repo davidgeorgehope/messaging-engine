@@ -62,7 +62,7 @@ export default function NewSession() {
   const [selectedVoiceIds, setSelectedVoiceIds] = useState<string[]>([]);
   const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([]);
   const [pipeline, setPipeline] = useState('outside-in');
-  const [modelProfile, setModelProfile] = useState<'production' | 'test'>('test');
+  const [modelProfile, setModelProfile] = useState<'economy' | 'premium'>('economy');
 
   const [contextMode, setContextMode] = useState<'upload' | 'paste' | 'docs'>('upload');
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
@@ -249,15 +249,15 @@ export default function NewSession() {
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Model Profile</h2>
               <p className="text-sm text-gray-500 mt-0.5">
-                {modelProfile === 'production' ? 'Pro models — higher quality, slower, more expensive' : 'Flash models — faster, cheaper, good for iteration'}
+                {modelProfile === 'premium' ? 'Pro models — higher quality, slower, more expensive' : 'Flash models — faster, cheaper, good for iteration'}
               </p>
             </div>
             <div className="flex items-center bg-gray-100 rounded-lg p-1">
               <button
                 type="button"
-                onClick={() => setModelProfile('test')}
+                onClick={() => setModelProfile('economy')}
                 className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                  modelProfile === 'test'
+                  modelProfile === 'economy'
                     ? 'bg-emerald-500 text-white shadow-sm'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}

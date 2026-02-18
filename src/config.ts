@@ -149,12 +149,12 @@ export function validateConfig(): void {
 // Model Profile System — swap all models to Flash for cheap testing
 // ---------------------------------------------------------------------------
 
-export type ModelProfile = 'production' | 'test';
+export type ModelProfile = 'economy' | 'premium';
 
 export type ModelTask = 'flash' | 'pro' | 'deepResearch' | 'generation' | 'scoring' | 'deslop';
 
 const MODEL_PROFILES: Record<ModelProfile, Record<ModelTask, string>> = {
-  production: {
+  premium: {
     flash: 'gemini-3-flash-preview',
     pro: 'gemini-3-pro-preview',
     deepResearch: 'deep-research-pro-preview',
@@ -162,7 +162,7 @@ const MODEL_PROFILES: Record<ModelProfile, Record<ModelTask, string>> = {
     scoring: 'gemini-3-flash-preview',
     deslop: 'gemini-3-pro-preview',
   },
-  test: {
+  economy: {
     flash: 'gemini-2.5-flash',
     pro: 'gemini-2.5-flash',
     deepResearch: 'gemini-2.5-flash',
@@ -173,7 +173,7 @@ const MODEL_PROFILES: Record<ModelProfile, Record<ModelTask, string>> = {
 };
 
 export function getActiveModelProfile(): ModelProfile {
-  return (process.env.MODEL_PROFILE as ModelProfile) || 'test';
+  return (process.env.MODEL_PROFILE as ModelProfile) || 'economy';
 }
 
 export function getModelForTask(task: ModelTask): string {
@@ -181,6 +181,6 @@ export function getModelForTask(task: ModelTask): string {
   return MODEL_PROFILES[profile][task];
 }
 
-export function isTestProfile(): boolean {
-  return getActiveModelProfile() === 'test';
+export function isEconomyProfile(): boolean {
+  return getActiveModelProfile() === 'economy';
 }

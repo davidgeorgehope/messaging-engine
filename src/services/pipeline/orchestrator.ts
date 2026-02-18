@@ -15,7 +15,7 @@ import { PUBLIC_GENERATION_PRIORITY_ID } from '../../db/seed.js';
 import type { AssetType } from '../../services/generation/types.js';
 import type { GenerateOptions, AIResponse } from '../../services/ai/types.js';
 import { generateWithClaude, generateWithGemini, generateImage } from '../../services/ai/clients.js';
-import { getModelForTask, isTestProfile } from '../../config.js';
+import { getModelForTask } from '../../config.js';
 import { withLLMContext } from '../../services/ai/call-context.js';
 import { ASSET_TYPE_LABELS, ASSET_TYPE_TEMPERATURE, buildRefinementPrompt } from './prompts.js';
 import type { EvidenceBundle } from './evidence.js';
@@ -356,13 +356,11 @@ export interface StoryImage {
  * Parse story content (VARIANT 2 / long version) to extract key scenes,
  * generate image prompts for up to 3 scenes, and call generateImage() for each.
  * Non-fatal: failures are logged but don't block story storage.
- * Skipped entirely in test profile to avoid unnecessary API calls.
  */
 export async function generateStoryImages(
   assetId: string,
   content: string,
 ): Promise<StoryImage[]> {
-  if (isTestProfile()) return [];
 
   const images: StoryImage[] = [];
 
@@ -437,13 +435,11 @@ export async function generateStoryImages(
  * Parse storyboard VARIANT 2 content to extract 7 scene titles,
  * generate a visual storyboard panel for each scene.
  * Non-fatal: failures are logged but don't block storage.
- * Skipped entirely in test profile.
  */
 export async function generateStoryboardImages(
   assetId: string,
   content: string,
 ): Promise<StoryImage[]> {
-  if (isTestProfile()) return [];
 
   const images: StoryImage[] = [];
 
