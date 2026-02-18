@@ -766,15 +766,18 @@ export default function SessionWorkspace() {
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {displayContent}
               </ReactMarkdown>
-              {/* Story storyboard images */}
-              {activeTab === 'story' && activeVersion?.sourceDetail && (() => {
+              {/* Story / Storyboard images */}
+              {(activeTab === 'story' || activeTab === 'storyboard') && activeVersion?.sourceDetail && (() => {
                 try {
                   const detail = JSON.parse(activeVersion.sourceDetail);
                   if (detail.images?.length > 0) {
+                    const isStoryboard = activeTab === 'storyboard';
                     return (
                       <div className="mt-8 border-t border-gray-200 pt-6">
-                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Storyboard</h3>
-                        <div className="grid grid-cols-3 gap-4 not-prose">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                          {isStoryboard ? 'Scene Panels' : 'Storyboard'}
+                        </h3>
+                        <div className={`grid gap-4 not-prose ${isStoryboard ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4' : 'grid-cols-3'}`}>
                           {detail.images.map((img: { act: string; url: string; mimeType: string }, i: number) => (
                             <div key={i} className="rounded-lg overflow-hidden border border-gray-200">
                               <img src={img.url} alt={img.act} className="w-full h-48 object-cover" />

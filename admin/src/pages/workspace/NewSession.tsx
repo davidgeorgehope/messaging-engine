@@ -60,9 +60,7 @@ export default function NewSession() {
   const [existingMessaging, setExistingMessaging] = useState('');
 
   const [selectedVoiceIds, setSelectedVoiceIds] = useState<string[]>([]);
-  const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([
-    'battlecard', 'talk_track', 'launch_messaging', 'social_hook',
-  ]);
+  const [selectedAssetTypes, setSelectedAssetTypes] = useState<string[]>([]);
   const [pipeline, setPipeline] = useState('outside-in');
   const [modelProfile, setModelProfile] = useState<'production' | 'test'>('test');
 
@@ -147,6 +145,11 @@ export default function NewSession() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (selectedVoiceIds.length === 0) {
+      setError('Select at least one voice profile.');
+      return;
+    }
 
     if (selectedAssetTypes.length === 0) {
       setError('Select at least one asset type.');

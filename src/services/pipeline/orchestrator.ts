@@ -320,9 +320,10 @@ export async function storeVariant(
     createdAt: new Date().toISOString(),
   });
 
-  // Generate storyboard images for story assets (non-blocking, best-effort)
-  if (assetType === 'story') {
-    generateStoryImages(assetId, finalContent).then(async (images) => {
+  // Generate images for story/storyboard assets (non-blocking, best-effort)
+  if (assetType === 'story' || assetType === 'storyboard') {
+    const imageFn = assetType === 'storyboard' ? generateStoryboardImages : generateStoryImages;
+    imageFn(assetId, finalContent).then(async (images) => {
       if (images.length > 0) {
         // Update asset metadata with image references
         const existingMeta = { ...metadata, images };
@@ -330,10 +331,10 @@ export async function storeVariant(
           .set({ metadata: JSON.stringify(existingMeta), updatedAt: new Date().toISOString() })
           .where(eq(messagingAssets.id, assetId))
           .run();
-        logger.info('Story images stored in metadata', { assetId, imageCount: images.length });
+        logger.info(`${assetType} images stored in metadata`, { assetId, imageCount: images.length });
       }
     }).catch(err => {
-      logger.warn('Story image generation fire-and-forget failed', {
+      logger.warn(`${assetType} image generation fire-and-forget failed`, {
         assetId,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -420,6 +421,83 @@ export async function generateStoryImages(
     }
   } catch (err) {
     logger.warn('Story image generation failed entirely', {
+      assetId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  return images;
+}
+
+// ---------------------------------------------------------------------------
+// Storyboard Image Generation — one image per scene (up to 7)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse storyboard VARIANT 2 content to extract 7 scene titles,
+ * generate a visual storyboard panel for each scene.
+ * Non-fatal: failures are logged but don't block storage.
+ * Skipped entirely in test profile.
+ */
+export async function generateStoryboardImages(
+  assetId: string,
+  content: string,
+): Promise<StoryImage[]> {
+  if (isTestProfile()) return [];
+
+  const images: StoryImage[] = [];
+
+  try {
+    // Extract VARIANT 2 section
+    const variant2Match = content.match(/# VARIANT 2[:\s].*?\n([\s\S]*?)(?=# VARIANT|$)/i);
+    const variant2Content = variant2Match?.[1] ?? content;
+
+    // Extract scene titles: **Scene N (Title)** pattern
+    const sceneRegex = /\*\*Scene\s+\d+\s*\(([^)]+)\)\*\*/gi;
+    const scenes: string[] = [];
+    let match;
+    while ((match = sceneRegex.exec(variant2Content)) !== null) {
+      scenes.push(match[1].trim());
+    }
+
+    if (scenes.length === 0) {
+      logger.info('No storyboard scenes found to illustrate', { assetId });
+      return [];
+    }
+
+    // Ensure data/images/<assetId> directory exists
+    const { mkdirSync, writeFileSync } = await import('fs');
+    const { join } = await import('path');
+    const imageDir = join(process.cwd(), 'data', 'images', assetId);
+    mkdirSync(imageDir, { recursive: true });
+
+    for (let i = 0; i < scenes.length; i++) {
+      const scene = scenes[i];
+      const imagePrompt = `Create a storyboard panel illustration for scene "${scene}" in a visual transformation story. Style: clean, sequential storyboard art — like frames in a graphic novel or pitch deck. Minimal, modern, muted color palette. No text in the image. Each panel should feel like one frame in a larger visual narrative. Abstract or metaphorical — not literal.`;
+
+      try {
+        const result = await generateImage(imagePrompt);
+        const ext = result.mimeType.includes('png') ? 'png' : 'jpg';
+        const filename = `scene-${i + 1}.${ext}`;
+        writeFileSync(join(imageDir, filename), Buffer.from(result.imageData, 'base64'));
+
+        images.push({
+          act: `Scene ${i + 1}: ${scene}`,
+          url: `/api/images/${assetId}/${filename}`,
+          mimeType: result.mimeType,
+        });
+
+        logger.info('Storyboard image generated', { assetId, scene, filename });
+      } catch (imgErr) {
+        logger.warn('Failed to generate storyboard image, skipping', {
+          assetId,
+          scene,
+          error: imgErr instanceof Error ? imgErr.message : String(imgErr),
+        });
+      }
+    }
+  } catch (err) {
+    logger.warn('Storyboard image generation failed entirely', {
       assetId,
       error: err instanceof Error ? err.message : String(err),
     });
