@@ -14,7 +14,7 @@ import { validateGrounding } from '../../services/quality/grounding-validator.js
 import { PUBLIC_GENERATION_PRIORITY_ID } from '../../db/seed.js';
 import type { AssetType } from '../../services/generation/types.js';
 import type { GenerateOptions, AIResponse } from '../../services/ai/types.js';
-import { generateWithClaude, generateWithGemini, generateImage } from '../../services/ai/clients.js';
+import { generateWithClaude, generateWithGemini, generateImage, generateJSON } from '../../services/ai/clients.js';
 import { getModelForTask } from '../../config.js';
 import { withLLMContext } from '../../services/ai/call-context.js';
 import { ASSET_TYPE_LABELS, ASSET_TYPE_TEMPERATURE, buildRefinementPrompt } from './prompts.js';
@@ -352,67 +352,75 @@ export interface StoryImage {
   mimeType: string;
 }
 
+interface ExtractedScene {
+  title: string;
+  imagePrompt: string;
+}
+
 /**
- * Parse story content (VARIANT 2 / long version) to extract key scenes,
- * generate image prompts for up to 3 scenes, and call generateImage() for each.
+ * Use LLM to extract scenes and their image descriptions from story/storyboard content.
+ * The generated content already contains rich [IMAGE: ...] descriptions — extract those.
+ * Falls back to generating image prompts from scene text if no [IMAGE:] blocks exist.
+ */
+async function extractScenes(content: string): Promise<ExtractedScene[]> {
+  const { data } = await generateJSON<{ scenes: ExtractedScene[] }>(
+    `Extract all scenes from this content, in order. For each scene return:
+- "title": a short scene label
+- "imagePrompt": the image generation prompt. If the content contains [IMAGE: ...] descriptions, use those verbatim. Otherwise, write a detailed visual description of the scene suitable for image generation.
+
+Content:
+${content.substring(0, 15000)}
+
+Return a JSON object with a "scenes" array. Maximum 7 scenes.`,
+    { temperature: 0.2 },
+  );
+  return (data.scenes || []).slice(0, 7);
+}
+
+/**
+ * Extract scenes from story content via LLM, generate an image for each (up to 7).
+ * Uses the [IMAGE: ...] prompts already embedded in the generated content.
  * Non-fatal: failures are logged but don't block story storage.
  */
 export async function generateStoryImages(
   assetId: string,
   content: string,
 ): Promise<StoryImage[]> {
-
   const images: StoryImage[] = [];
 
   try {
-    // Extract sections from VARIANT 2 (long version)
-    const variant2Match = content.match(/# VARIANT 2[:\s].*?\n([\s\S]*?)(?=# VARIANT|$)/i);
-    const variant2Content = variant2Match?.[1] ?? content;
+    const scenes = await extractScenes(content);
 
-    // Find section headers to extract key scenes
-    const sectionRegex = /##\s+(?:The\s+)?(.+?)(?:\n|\r)/gi;
-    const sections: string[] = [];
-    let match;
-    while ((match = sectionRegex.exec(variant2Content)) !== null) {
-      sections.push(match[1].trim());
+    if (scenes.length === 0) {
+      logger.info('No story scenes found to illustrate', { assetId });
+      return [];
     }
 
-    // Pick up to 3 evenly spaced scenes
-    const scenesToIllustrate = sections.length <= 3
-      ? sections
-      : [sections[0], sections[Math.floor(sections.length / 2)], sections[sections.length - 1]];
-
-    if (scenesToIllustrate.length === 0) {
-      scenesToIllustrate.push('Opening Scene', 'Transformation', 'Future Vision');
-    }
-
-    // Ensure data/images/<assetId> directory exists
     const { mkdirSync, writeFileSync } = await import('fs');
     const { join } = await import('path');
     const imageDir = join(process.cwd(), 'data', 'images', assetId);
     mkdirSync(imageDir, { recursive: true });
 
-    for (let i = 0; i < Math.min(scenesToIllustrate.length, 3); i++) {
-      const scene = scenesToIllustrate[i];
-      const imagePrompt = `Create a cinematic, editorial-style illustration for a business story section titled "${scene}". The style should be modern, clean, and professional — suitable for a thought-leadership article. No text in the image. Subtle, muted color palette. Abstract or metaphorical representation rather than literal.`;
+    for (let i = 0; i < scenes.length; i++) {
+      const scene = scenes[i];
 
       try {
-        const result = await generateImage(imagePrompt);
+        const result = await generateImage(scene.imagePrompt);
         const ext = result.mimeType.includes('png') ? 'png' : 'jpg';
         const filename = `scene-${i + 1}.${ext}`;
         writeFileSync(join(imageDir, filename), Buffer.from(result.imageData, 'base64'));
 
         images.push({
-          act: scene,
+          act: scene.title,
           url: `/api/images/${assetId}/${filename}`,
           mimeType: result.mimeType,
         });
 
-        logger.info('Story image generated', { assetId, scene, filename });
+        logger.info('Story image generated', { assetId, scene: scene.title, filename });
       } catch (imgErr) {
         logger.warn('Failed to generate story image, skipping', {
           assetId,
-          scene,
+          scene: scene.title,
           error: imgErr instanceof Error ? imgErr.message : String(imgErr),
         });
       }
@@ -432,36 +440,24 @@ export async function generateStoryImages(
 // ---------------------------------------------------------------------------
 
 /**
- * Parse storyboard VARIANT 2 content to extract 7 scene titles,
- * generate a visual storyboard panel for each scene.
+ * Extract scenes from storyboard content via LLM, generate a panel for each (up to 7).
+ * Uses the [IMAGE: ...] prompts already embedded in the generated content.
  * Non-fatal: failures are logged but don't block storage.
  */
 export async function generateStoryboardImages(
   assetId: string,
   content: string,
 ): Promise<StoryImage[]> {
-
   const images: StoryImage[] = [];
 
   try {
-    // Extract VARIANT 2 section
-    const variant2Match = content.match(/# VARIANT 2[:\s].*?\n([\s\S]*?)(?=# VARIANT|$)/i);
-    const variant2Content = variant2Match?.[1] ?? content;
-
-    // Extract scene titles: **Scene N (Title)** pattern
-    const sceneRegex = /\*\*Scene\s+\d+\s*\(([^)]+)\)\*\*/gi;
-    const scenes: string[] = [];
-    let match;
-    while ((match = sceneRegex.exec(variant2Content)) !== null) {
-      scenes.push(match[1].trim());
-    }
+    const scenes = await extractScenes(content);
 
     if (scenes.length === 0) {
       logger.info('No storyboard scenes found to illustrate', { assetId });
       return [];
     }
 
-    // Ensure data/images/<assetId> directory exists
     const { mkdirSync, writeFileSync } = await import('fs');
     const { join } = await import('path');
     const imageDir = join(process.cwd(), 'data', 'images', assetId);
@@ -469,25 +465,24 @@ export async function generateStoryboardImages(
 
     for (let i = 0; i < scenes.length; i++) {
       const scene = scenes[i];
-      const imagePrompt = `Create a storyboard panel illustration for scene "${scene}" in a visual transformation story. Style: clean, sequential storyboard art — like frames in a graphic novel or pitch deck. Minimal, modern, muted color palette. No text in the image. Each panel should feel like one frame in a larger visual narrative. Abstract or metaphorical — not literal.`;
 
       try {
-        const result = await generateImage(imagePrompt);
+        const result = await generateImage(scene.imagePrompt);
         const ext = result.mimeType.includes('png') ? 'png' : 'jpg';
         const filename = `scene-${i + 1}.${ext}`;
         writeFileSync(join(imageDir, filename), Buffer.from(result.imageData, 'base64'));
 
         images.push({
-          act: `Scene ${i + 1}: ${scene}`,
+          act: `Scene ${i + 1}: ${scene.title}`,
           url: `/api/images/${assetId}/${filename}`,
           mimeType: result.mimeType,
         });
 
-        logger.info('Storyboard image generated', { assetId, scene, filename });
+        logger.info('Storyboard image generated', { assetId, scene: scene.title, filename });
       } catch (imgErr) {
         logger.warn('Failed to generate storyboard image, skipping', {
           assetId,
-          scene,
+          scene: scene.title,
           error: imgErr instanceof Error ? imgErr.message : String(imgErr),
         });
       }
