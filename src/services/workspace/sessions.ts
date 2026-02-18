@@ -309,17 +309,40 @@ export async function getSessionWithResults(sessionId: string, userId?: string, 
     }
   }
 
-  // Load session versions
+  // Load session versions, enriched with voice profile names
   const versions = await db.query.sessionVersions.findMany({
     where: eq(sessionVersions.sessionId, sessionId),
     orderBy: [desc(sessionVersions.versionNumber)],
   });
   if (versions.length > 0) {
-    // Group by asset type
+    // Collect all voice profile IDs from sourceDetail to resolve names
+    const voiceIdSet = new Set<string>();
+    const parsedDetails = new Map<string, Record<string, any>>();
+    for (const v of versions) {
+      try {
+        const detail = JSON.parse(v.sourceDetail || '{}');
+        parsedDetails.set(v.id, detail);
+        const vid = detail.voiceProfileId || detail.newVoiceId;
+        if (vid) voiceIdSet.add(vid);
+      } catch { /* skip */ }
+    }
+    // Bulk-load voice names
+    const voiceNameMap = new Map<string, string>();
+    if (voiceIdSet.size > 0) {
+      const allVoices = await db.query.voiceProfiles.findMany({
+        where: inArray(voiceProfiles.id, Array.from(voiceIdSet)),
+        columns: { id: true, name: true },
+      });
+      for (const vp of allVoices) voiceNameMap.set(vp.id, vp.name);
+    }
+    // Group by asset type, attach voiceName
     const versionsByType: Record<string, any[]> = {};
     for (const v of versions) {
       if (!versionsByType[v.assetType]) versionsByType[v.assetType] = [];
-      versionsByType[v.assetType].push(v);
+      const detail = parsedDetails.get(v.id) || {};
+      const vid = detail.voiceProfileId || detail.newVoiceId;
+      const voiceName = detail.voiceName || detail.newVoiceName || (vid ? voiceNameMap.get(vid) : undefined) || null;
+      versionsByType[v.assetType].push({ ...v, voiceName });
     }
     response.versions = versionsByType;
   }

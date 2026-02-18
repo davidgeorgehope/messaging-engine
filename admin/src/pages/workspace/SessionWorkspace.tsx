@@ -580,7 +580,7 @@ export default function SessionWorkspace() {
                 >
                   {activeVersions.map((v: any) => (
                     <option key={v.id} value={v.id}>
-                      v{v.versionNumber} — {v.source}{v.isActive ? ' (active)' : ''}
+                      v{v.versionNumber} — {v.source}{v.voiceName ? ` [${v.voiceName}]` : ''}{v.isActive ? ' (active)' : ''}
                     </option>
                   ))}
                 </select>
