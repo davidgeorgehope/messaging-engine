@@ -335,14 +335,30 @@ export async function getSessionWithResults(sessionId: string, userId?: string, 
       });
       for (const vp of allVoices) voiceNameMap.set(vp.id, vp.name);
     }
-    // Group by asset type, attach voiceName
+    // Build asset images lookup (source of truth — updated after fire-and-forget completes)
+    const assetImagesMap = new Map<string, any[]>();
+    if (session.jobId) {
+      const jobAssets = await db.query.messagingAssets.findMany({
+        where: eq(messagingAssets.jobId, session.jobId),
+        columns: { id: true, metadata: true },
+      });
+      for (const a of jobAssets) {
+        try {
+          const meta = JSON.parse(a.metadata || '{}');
+          if (meta.images?.length) assetImagesMap.set(a.id, meta.images);
+        } catch { /* skip */ }
+      }
+    }
+    // Group by asset type, attach voiceName and images
     const versionsByType: Record<string, any[]> = {};
     for (const v of versions) {
       if (!versionsByType[v.assetType]) versionsByType[v.assetType] = [];
       const detail = parsedDetails.get(v.id) || {};
       const vid = detail.voiceProfileId || detail.newVoiceId;
       const voiceName = detail.voiceName || detail.newVoiceName || (vid ? voiceNameMap.get(vid) : undefined) || null;
-      versionsByType[v.assetType].push({ ...v, voiceName });
+      // Inject images: prefer sourceDetail, fall back to asset metadata (handles race condition)
+      const images = detail.images || (detail.assetId ? assetImagesMap.get(detail.assetId) : undefined) || null;
+      versionsByType[v.assetType].push({ ...v, voiceName, images });
     }
     response.versions = versionsByType;
   }
