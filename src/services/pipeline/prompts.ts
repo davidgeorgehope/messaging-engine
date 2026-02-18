@@ -17,13 +17,15 @@ const logger = createLogger('pipeline:prompts');
 
 const TEMPLATE_DIR = join(process.cwd(), 'templates');
 
-export const ALL_ASSET_TYPES: AssetType[] = ['battlecard', 'talk_track', 'launch_messaging', 'social_hook', 'one_pager', 'email_copy', 'messaging_template', 'narrative', 'storyboard'];
+export const ALL_ASSET_TYPES: AssetType[] = ['battlecard', 'talk_track', 'launch_messaging', 'social_hook', 'one_pager', 'email_copy', 'messaging_template', 'narrative', 'storyboard', 'story', 'blog_post'];
 
 export const ASSET_TYPE_TEMPERATURE: Record<AssetType, number> = {
   social_hook: 0.85,
   storyboard: 0.82,
+  story: 0.8,
   narrative: 0.8,
   email_copy: 0.75,
+  blog_post: 0.7,
   launch_messaging: 0.7,
   one_pager: 0.6,
   talk_track: 0.65,
@@ -41,6 +43,8 @@ export const ASSET_TYPE_LABELS: Record<AssetType, string> = {
   messaging_template: 'Messaging Template',
   narrative: 'Narrative',
   storyboard: 'Storyboard',
+  story: 'Story',
+  blog_post: 'Blog Post',
 };
 
 export async function loadTemplate(assetType: AssetType): Promise<string> {
@@ -160,10 +164,25 @@ Weave practitioner quotes naturally throughout. Mark each variant clearly with h
     typeInstructions = `
 
 ## Storyboard Instructions
-You are generating a multi-act transformation storyboard (2000-2500 words total).
+You are generating a transformation storyboard with 2 length variants in a single output.
 This is strategic storytelling — think T-Mobile Un-carrier style: the status quo is the villain, the product is the enabler (not the hero), and the customer's world is what transforms.
 
-### 3-Act Structure with 7 Scenes:
+### VARIANT 1: Short Storyboard (~800-1000 words)
+**Purpose**: Executive presentations, pitch decks, quick-read overviews.
+
+Condensed 3-act structure — one tight paragraph per beat:
+- **Act 1 — The Broken World** (2-3 paragraphs): The status quo villain + human cost. Vivid but concise.
+- **Act 2 — The Turning Point** (1-2 paragraphs): The contrarian insight + what becomes possible.
+- **Act 3 — The New World** (1-2 paragraphs): Concrete before/after transformation.
+- **Story Spine**: Single standalone paragraph using "Once upon a time... Until one day... Because of that..." structure.
+- **Taglines**: 3-5 sticky phrases.
+
+Tone: Punchy, every sentence earns its place. A reader should get the full emotional arc in 4 minutes.
+
+### VARIANT 2: Full Storyboard (~2000-2500 words)
+**Purpose**: Long-form content, keynotes, detailed positioning documents.
+
+Full 3-act structure with 7 scenes:
 
 **ACT 1: THE WORLD AS IT IS** (~800 words) — Emotion: frustration, recognition
 - Scene 1 (Status Quo Villain): Name the broken thing everyone accepts. Don't attack competitors — attack the approach.
@@ -171,23 +190,88 @@ This is strategic storytelling — think T-Mobile Un-carrier style: the status q
 - Scene 3 (Failed Attempts): Show why the problem persists structurally. Half-measures and band-aids haven't worked.
 
 **ACT 2: THE TURNING POINT** (~600 words) — Emotion: hope, excitement
-- Scene 4 (The Insight): The reframe — a contrarian question that changes everything. "What if we just... stopped doing that?"
-- Scene 5 (A Different Approach): What follows logically from the insight. This is where the product enters — as an enabler, not a hero.
+- Scene 4 (The Insight): The reframe — a contrarian question that changes everything.
+- Scene 5 (A Different Approach): What follows logically from the insight. Product enters as enabler, not hero.
 
 **ACT 3: THE NEW WORLD** (~600 words) — Emotion: excitement, aspiration
-- Scene 6 (The Transformation): Concrete before/after for the same scenarios from Act 1. Same person, completely different experience.
+- Scene 6 (The Transformation): Concrete before/after for the same scenarios from Act 1.
 - Scene 7 (The Invitation): Forward-looking vision, not a sales pitch. Invite the reader into the movement.
 
-### Additional Required Elements:
-- **STORY SPINE**: A single standalone paragraph using the "Once upon a time... Until one day... Because of that..." structure
+Plus:
+- **STORY SPINE**: Standalone paragraph using "Once upon a time... Until one day... Because of that..." structure
 - **TAGLINES**: 5-8 sticky, memorable phrases that capture the transformation
 
 ### Critical Rules:
+- Each variant MUST be standalone — use headers: \`# VARIANT 1: Short Storyboard\`, \`# VARIANT 2: Full Storyboard\`
 - The status quo is the VILLAIN — not a competitor
 - The product is the ENABLER — not the hero. The customer is the hero.
 - Each act must have distinct emotional beats (frustration → hope → excitement)
 - Practitioner quotes ground the story in reality — weave them into scenes naturally
-- Every scene must advance the narrative — no filler sections`;
+- Every scene must advance the narrative — no filler sections
+- No meta-commentary between variants — just the content`;
+  } else if (assetType === 'story') {
+    typeInstructions = `
+
+## Story Instructions
+You are generating a storytelling document with 2 length variants in a single output.
+
+### VARIANT 1: Short Story (~500-800 words)
+**Purpose**: Blog posts, LinkedIn articles, quick-read thought pieces.
+
+Structure:
+- **Hook** (1-2 sentences): A vivid moment, surprising observation, or provocative question that pulls the reader in
+- **The Problem** (2-3 paragraphs): A recognizable scenario — make the reader feel "that's me." Ground it in specifics.
+- **The Shift** (1-2 paragraphs): The insight or turning point that changes how we see the problem
+- **The New Reality** (1-2 paragraphs): What becomes possible — concrete, not aspirational
+- **Takeaway** (1-2 sentences): The one thing the reader should remember
+
+Tone: Conversational, specific, human. Like a senior practitioner telling a story at a conference after-party.
+
+### VARIANT 2: Long Story (~2000-3000 words)
+**Purpose**: Long-form content, magazine-style articles, detailed case narratives, keynote material.
+
+Structure:
+- **Opening Scene** (2-3 paragraphs): Drop the reader into a specific moment — a team facing a crisis, a practitioner hitting a wall. Make it visceral and immediate.
+- **The Wider Problem** (2-3 paragraphs): Zoom out from the scene to show this isn't isolated. This is structural. Everyone faces it.
+- **Root Cause** (2-3 paragraphs): Why previous attempts to fix this failed. What's fundamentally broken about the current approach.
+- **The Catalyst** (1-2 paragraphs): What changed — a new insight, a different way of thinking about the problem
+- **The Transformation** (3-4 paragraphs): Show the same scenarios from the opening, but now transformed. Same people, completely different experience. Be specific about what's different and why.
+- **The Future Vision** (1-2 paragraphs): Where this leads — not a sales pitch but a genuine look at what becomes possible
+- **Taglines** (5-8 options): Memorable phrases that capture the story's essence
+
+Tone: Long-form storytelling. Immersive, detailed, with genuine emotional resonance.
+
+### Rules
+- Each variant MUST be standalone — a reader of Variant 1 should never feel like they're reading an excerpt
+- Weave practitioner quotes naturally throughout
+- Every claim traces to product docs or competitive research
+- Use headers: \`# VARIANT 1: Short Story\`, \`# VARIANT 2: Long Story\`
+- No meta-commentary between variants — just the content`;
+  } else if (assetType === 'blog_post') {
+    typeInstructions = `
+
+## Blog Post Instructions
+You are generating a thought-leadership blog post (1500-2500 words).
+This is NOT vendor marketing. This reads like something a respected industry voice would publish on their personal blog or in a major industry publication.
+
+Structure:
+- **Title**: Compelling, specific headline (not clickbait). Should make a practitioner think "I need to read this."
+- **Introduction** (2-3 paragraphs): Open with a recognizable problem or provocative thesis. State what you'll argue and why it matters.
+- **Body Sections** (3-5 sections with headers): Each section advances the argument. Use a mix of:
+  - Practitioner scenarios and pain points
+  - Data or evidence from community/competitive research
+  - Technical specifics grounded in product capabilities
+  - Contrarian takes or fresh perspectives
+- **Conclusion** (1-2 paragraphs): Synthesize the argument. Give the reader a clear takeaway and a reason to care.
+
+Tone: Thought leadership — opinionated but evidence-backed. The author has earned credibility through deep domain knowledge. Not neutral reporting, not vendor cheerleading. Think "senior practitioner who also happens to write well."
+
+### Rules
+- Lead with insight, not product
+- Every section must advance the argument — no filler
+- Use specific examples, not generic claims
+- Practitioner language throughout — write like someone who does this work
+- The product should appear naturally as part of the argument, not be the centerpiece`;
   }
 
   const personaAngle = PERSONA_ANGLES[voice.slug] || '';

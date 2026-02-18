@@ -14,8 +14,8 @@ import { validateGrounding } from '../../services/quality/grounding-validator.js
 import { PUBLIC_GENERATION_PRIORITY_ID } from '../../db/seed.js';
 import type { AssetType } from '../../services/generation/types.js';
 import type { GenerateOptions, AIResponse } from '../../services/ai/types.js';
-import { generateWithClaude, generateWithGemini } from '../../services/ai/clients.js';
-import { getModelForTask } from '../../config.js';
+import { generateWithClaude, generateWithGemini, generateImage } from '../../services/ai/clients.js';
+import { getModelForTask, isTestProfile } from '../../config.js';
 import { withLLMContext } from '../../services/ai/call-context.js';
 import { ASSET_TYPE_LABELS, ASSET_TYPE_TEMPERATURE, buildRefinementPrompt } from './prompts.js';
 import type { EvidenceBundle } from './evidence.js';
@@ -140,7 +140,11 @@ export async function generateAndScore(
   personaContext?: PersonaScoringContext,
 ): Promise<GenerateAndScoreResult> {
   const temperature = assetType ? ASSET_TYPE_TEMPERATURE[assetType] ?? 0.7 : 0.7;
-  const response = await generateContent(userPrompt, {
+  // Prompt echo technique: repeating the user prompt gives the model a second
+  // pass through the full context during left-to-right processing, dramatically
+  // improving accuracy on initial generation calls.
+  const echoedPrompt = `${userPrompt}\n\n---\n\n${userPrompt}`;
+  const response = await generateContent(echoedPrompt, {
     systemPrompt,
     temperature,
   }, model);
@@ -315,6 +319,113 @@ export async function storeVariant(
     }) : null,
     createdAt: new Date().toISOString(),
   });
+
+  // Generate storyboard images for story assets (non-blocking, best-effort)
+  if (assetType === 'story') {
+    generateStoryImages(assetId, finalContent).then(async (images) => {
+      if (images.length > 0) {
+        // Update asset metadata with image references
+        const existingMeta = { ...metadata, images };
+        await db.update(messagingAssets)
+          .set({ metadata: JSON.stringify(existingMeta), updatedAt: new Date().toISOString() })
+          .where(eq(messagingAssets.id, assetId))
+          .run();
+        logger.info('Story images stored in metadata', { assetId, imageCount: images.length });
+      }
+    }).catch(err => {
+      logger.warn('Story image generation fire-and-forget failed', {
+        assetId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Story Image Generation
+// ---------------------------------------------------------------------------
+
+export interface StoryImage {
+  act: string;
+  url: string;
+  mimeType: string;
+}
+
+/**
+ * Parse story content (VARIANT 2 / long version) to extract key scenes,
+ * generate image prompts for up to 3 scenes, and call generateImage() for each.
+ * Non-fatal: failures are logged but don't block story storage.
+ * Skipped entirely in test profile to avoid unnecessary API calls.
+ */
+export async function generateStoryImages(
+  assetId: string,
+  content: string,
+): Promise<StoryImage[]> {
+  if (isTestProfile()) return [];
+
+  const images: StoryImage[] = [];
+
+  try {
+    // Extract sections from VARIANT 2 (long version)
+    const variant2Match = content.match(/# VARIANT 2[:\s].*?\n([\s\S]*?)(?=# VARIANT|$)/i);
+    const variant2Content = variant2Match?.[1] ?? content;
+
+    // Find section headers to extract key scenes
+    const sectionRegex = /##\s+(?:The\s+)?(.+?)(?:\n|\r)/gi;
+    const sections: string[] = [];
+    let match;
+    while ((match = sectionRegex.exec(variant2Content)) !== null) {
+      sections.push(match[1].trim());
+    }
+
+    // Pick up to 3 evenly spaced scenes
+    const scenesToIllustrate = sections.length <= 3
+      ? sections
+      : [sections[0], sections[Math.floor(sections.length / 2)], sections[sections.length - 1]];
+
+    if (scenesToIllustrate.length === 0) {
+      scenesToIllustrate.push('Opening Scene', 'Transformation', 'Future Vision');
+    }
+
+    // Ensure data/images/<assetId> directory exists
+    const { mkdirSync, writeFileSync } = await import('fs');
+    const { join } = await import('path');
+    const imageDir = join(process.cwd(), 'data', 'images', assetId);
+    mkdirSync(imageDir, { recursive: true });
+
+    for (let i = 0; i < Math.min(scenesToIllustrate.length, 3); i++) {
+      const scene = scenesToIllustrate[i];
+      const imagePrompt = `Create a cinematic, editorial-style illustration for a business story section titled "${scene}". The style should be modern, clean, and professional — suitable for a thought-leadership article. No text in the image. Subtle, muted color palette. Abstract or metaphorical representation rather than literal.`;
+
+      try {
+        const result = await generateImage(imagePrompt);
+        const ext = result.mimeType.includes('png') ? 'png' : 'jpg';
+        const filename = `scene-${i + 1}.${ext}`;
+        writeFileSync(join(imageDir, filename), Buffer.from(result.imageData, 'base64'));
+
+        images.push({
+          act: scene,
+          url: `/api/images/${assetId}/${filename}`,
+          mimeType: result.mimeType,
+        });
+
+        logger.info('Story image generated', { assetId, scene, filename });
+      } catch (imgErr) {
+        logger.warn('Failed to generate story image, skipping', {
+          assetId,
+          scene,
+          error: imgErr instanceof Error ? imgErr.message : String(imgErr),
+        });
+      }
+    }
+  } catch (err) {
+    logger.warn('Story image generation failed entirely', {
+      assetId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  return images;
 }
 
 // ---------------------------------------------------------------------------

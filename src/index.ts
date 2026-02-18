@@ -17,6 +17,26 @@ async function main() {
   // Create API
   const app = createApi();
 
+  // Serve generated story images
+  app.get('/api/images/:assetId/:filename', async (c) => {
+    const { assetId, filename } = c.req.param();
+    // Sanitize to prevent path traversal
+    if (assetId.includes('..') || filename.includes('..') || filename.includes('/')) {
+      return c.text('Bad request', 400);
+    }
+    const fs = await import('fs');
+    const path = await import('path');
+    const filePath = path.join(process.cwd(), 'data', 'images', assetId, filename);
+    try {
+      const data = fs.readFileSync(filePath);
+      const ext = path.extname(filename).toLowerCase();
+      const mimeType = ext === '.png' ? 'image/png' : 'image/jpeg';
+      return new Response(data, { headers: { 'Content-Type': mimeType, 'Cache-Control': 'public, max-age=86400' } });
+    } catch {
+      return c.text('Not found', 404);
+    }
+  });
+
   // Static assets from Vite build
   app.use('/assets/*', serveStatic({ root: './admin/dist' }));
 

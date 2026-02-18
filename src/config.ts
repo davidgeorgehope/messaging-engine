@@ -173,7 +173,7 @@ const MODEL_PROFILES: Record<ModelProfile, Record<ModelTask, string>> = {
 };
 
 export function getActiveModelProfile(): ModelProfile {
-  return (process.env.MODEL_PROFILE as ModelProfile) || 'production';
+  return (process.env.MODEL_PROFILE as ModelProfile) || 'test';
 }
 
 export function getModelForTask(task: ModelTask): string {

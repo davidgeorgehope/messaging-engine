@@ -64,7 +64,7 @@ export default function NewSession() {
     'battlecard', 'talk_track', 'launch_messaging', 'social_hook',
   ]);
   const [pipeline, setPipeline] = useState('outside-in');
-  const [modelProfile, setModelProfile] = useState<'production' | 'test'>('production');
+  const [modelProfile, setModelProfile] = useState<'production' | 'test'>('test');
 
   const [contextMode, setContextMode] = useState<'upload' | 'paste' | 'docs'>('upload');
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
@@ -261,17 +261,18 @@ export default function NewSession() {
               >
                 ⚡ Cheap
               </button>
-              <button
-                type="button"
-                onClick={() => setModelProfile('production')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                  modelProfile === 'production'
-                    ? 'bg-indigo-500 text-white shadow-sm'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                💎 Expensive
-              </button>
+              <div className="relative group">
+                <button
+                  type="button"
+                  disabled
+                  className="px-4 py-2 rounded-md text-sm font-medium transition-all text-gray-400 cursor-not-allowed opacity-50"
+                >
+                  💎 Expensive
+                </button>
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                  Disabled to reduce costs — Flash models are default
+                </div>
+              </div>
             </div>
           </div>
         </section>

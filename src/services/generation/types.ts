@@ -1,4 +1,4 @@
-export type AssetType = 'battlecard' | 'talk_track' | 'launch_messaging' | 'social_hook' | 'one_pager' | 'email_copy' | 'messaging_template' | 'narrative' | 'storyboard';
+export type AssetType = 'battlecard' | 'talk_track' | 'launch_messaging' | 'social_hook' | 'one_pager' | 'email_copy' | 'messaging_template' | 'narrative' | 'storyboard' | 'story' | 'blog_post';
 
 export type GenerationStep = 'research' | 'context' | 'generate' | 'score' | 'stress_test' | 'store';
 

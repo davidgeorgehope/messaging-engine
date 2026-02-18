@@ -186,7 +186,7 @@ export async function startSessionGeneration(sessionId: string) {
       voiceProfileIds,
       assetTypes,
       model: getModelForTask(sessionMeta.modelProfile === 'test' ? 'flash' : 'pro'),
-      modelProfile: sessionMeta.modelProfile || 'production',
+      modelProfile: sessionMeta.modelProfile || 'test',
       pipeline,
     }),
     startedAt: now,
@@ -201,7 +201,7 @@ export async function startSessionGeneration(sessionId: string) {
     .run();
 
   // Fire-and-forget the generation pipeline — set model profile for this job
-  const jobModelProfile = sessionMeta.modelProfile || 'production';
+  const jobModelProfile = sessionMeta.modelProfile || 'test';
   process.env.MODEL_PROFILE = jobModelProfile;
   logger.info('Starting generation with model profile', { jobId, modelProfile: jobModelProfile });
   runPublicGenerationJob(jobId)
@@ -214,7 +214,7 @@ export async function startSessionGeneration(sessionId: string) {
       await createInitialVersions(sessionId, jobId).catch(err => {
         logger.warn('Failed to create initial versions', { sessionId, jobId, error: err instanceof Error ? err.message : String(err) });
       });
-      process.env.MODEL_PROFILE = 'production';
+      process.env.MODEL_PROFILE = 'test';
       logger.info('Session generation completed', { sessionId, jobId, modelProfile: jobModelProfile });
     })
     .catch(async (error) => {

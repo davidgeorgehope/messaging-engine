@@ -26,6 +26,7 @@ export async function createInitialVersions(sessionId: string, jobId: string) {
 
   for (const asset of assets) {
     const variant = allVariants.find(v => v.assetId === asset.id);
+    const assetMeta = JSON.parse(asset.metadata || '{}');
 
     await db.insert(sessionVersions).values({
       id: generateId(),
@@ -38,6 +39,7 @@ export async function createInitialVersions(sessionId: string, jobId: string) {
         assetId: asset.id,
         variantId: variant?.id,
         voiceProfileId: variant?.voiceProfileId,
+        ...(assetMeta.images ? { images: assetMeta.images } : {}),
       }),
       slopScore: asset.slopScore,
       vendorSpeakScore: asset.vendorSpeakScore,

@@ -746,3 +746,102 @@ export function extractSourcesFromResponse(text: string, interaction: Record<str
 
   return sources;
 }
+
+// ---------------------------------------------------------------------------
+// generateImage — AI image generation via Gemini Flash
+// ---------------------------------------------------------------------------
+
+export interface GeneratedImage {
+  imageData: string; // base64-encoded image
+  mimeType: string;
+}
+
+export async function generateImage(
+  prompt: string,
+): Promise<GeneratedImage> {
+  const model = 'gemini-2.0-flash-exp';
+
+  await geminiFlashRateLimiter.acquire();
+
+  logger.info('Gemini image generation call', { model, promptLength: prompt.length });
+  const startTime = performance.now();
+
+  try {
+    const response = await withRetry(
+      async () => {
+        const client = getGoogleClient();
+        return client.models.generateContent({
+          model,
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: prompt }],
+            },
+          ],
+          config: {
+            responseModalities: ['IMAGE', 'TEXT'],
+          } as any,
+        });
+      },
+      {
+        maxRetries: 2,
+        baseDelayMs: 3000,
+        retryOn: (error: Error) => {
+          const msg = error.message.toLowerCase();
+          return msg.includes('rate') || msg.includes('quota') || msg.includes('503');
+        },
+      }
+    );
+
+    const latencyMs = Math.round(performance.now() - startTime);
+
+    // Extract image data from response parts
+    const candidates = response.candidates ?? [];
+    for (const candidate of candidates) {
+      const parts = (candidate as any).content?.parts ?? [];
+      for (const part of parts) {
+        if (part.inlineData) {
+          const usageMeta = response.usageMetadata;
+          const usage: TokenUsage = {
+            inputTokens: usageMeta?.promptTokenCount ?? 0,
+            outputTokens: usageMeta?.candidatesTokenCount ?? 0,
+            totalTokens: usageMeta?.totalTokenCount ?? 0,
+          };
+
+          usageTracker.track(model, usage, latencyMs);
+
+          logCall({
+            model,
+            userPrompt: prompt,
+            response: '[image generated]',
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            totalTokens: usage.totalTokens,
+            latencyMs,
+            success: true,
+          });
+
+          return {
+            imageData: part.inlineData.data,
+            mimeType: part.inlineData.mimeType ?? 'image/png',
+          };
+        }
+      }
+    }
+
+    throw new Error('No image data in response');
+  } catch (error) {
+    usageTracker.trackError(model);
+    logger.error('Gemini image generation failed', {
+      model,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    logCall({
+      model,
+      userPrompt: prompt,
+      success: false,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+}
