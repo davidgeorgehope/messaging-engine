@@ -72,12 +72,12 @@ Controlled by `MODEL_PROFILE` env var (`'economy'` | `'premium'`).
 
 | Task | Premium Model | Economy Model |
 |------|--------------|---------------|
-| flash | gemini-3-flash-preview | gemini-2.5-flash |
-| pro | gemini-3-pro-preview | gemini-2.5-flash |
-| deepResearch | deep-research-pro-preview | gemini-2.5-flash |
-| generation | gemini-3-pro-preview | gemini-2.5-flash |
-| scoring | gemini-3-flash-preview | gemini-2.5-flash |
-| deslop | gemini-3-pro-preview | gemini-2.5-flash |
+| flash | gemini-flash-latest | gemini-flash-lite-latest |
+| pro | gemini-pro-latest | gemini-flash-latest |
+| deepResearch | deep-research-max-preview-04-2026 | gemini-flash-latest |
+| generation | gemini-pro-latest | gemini-flash-latest |
+| scoring | gemini-flash-latest | gemini-flash-lite-latest |
+| deslop | gemini-pro-latest | gemini-flash-latest |
 
 Use `getModelForTask(task)` from `config.ts` — never hardcode model names. Claude (`claude-opus-4-6`) is opt-in override only when user explicitly selects it.
 

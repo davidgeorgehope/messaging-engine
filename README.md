@@ -225,7 +225,7 @@ The system uses different model classes for different jobs rather than treating 
 | Scoring | Fast model |
 | Deslop/refinement | Strong writing model |
 
-Model selection is routed through `getModelForTask(task)`, so production and economy/test profiles can swap models without rewriting pipeline logic.
+Model selection is routed through `getModelForTask(task)`, so premium and economy profiles can swap models without rewriting pipeline logic.
 
 ## Workspace Session Loop
 

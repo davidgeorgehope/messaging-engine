@@ -63,7 +63,7 @@ async function createTestJob(pipeline: string, opts: { existingMessaging?: strin
       existingMessaging: opts.existingMessaging,
       voiceProfileIds: [testVoiceId],
       assetTypes: ['battlecard'],  // single asset type for speed
-      model: 'gemini-2.0-flash',
+      model: 'gemini-flash-latest',
       pipeline,
     }),
     startedAt: now,

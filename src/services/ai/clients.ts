@@ -541,16 +541,25 @@ export async function createDeepResearchInteraction(prompt: string): Promise<str
 
   logger.info('Creating deep research interaction', { model, promptLength: prompt.length });
 
-  const response = await withRetry(
+  if (!model.startsWith('deep-research')) {
+    logger.info('Model does not support Deep Research interactions, using grounded search fallback', { model });
+    const result = await generateWithGeminiGroundedSearch(prompt, { model });
+    const syntheticId = `dr-fallback-${Date.now().toString(36)}`;
+    _syncResults.set(syntheticId, {
+      text: result.text,
+      sources: result.sources,
+    });
+
+    return syntheticId;
+  }
+
+  const interaction = await withRetry(
     async () => {
-      return client.models.generateContent({
-        model,
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: prompt }],
-          },
-        ],
+      return (client as any).interactions.create({
+        input: prompt,
+        agent: model,
+        background: true,
+        store: true,
       });
     },
     {
@@ -559,30 +568,12 @@ export async function createDeepResearchInteraction(prompt: string): Promise<str
     }
   );
 
-  // The deep research agent returns an interaction ID in the response metadata
-  // or in the response structure as an async operation
-  const interactionId = (response as any).name
-    ?? (response as any).operationId
-    ?? (response as any).metadata?.interactionId;
-
-  if (!interactionId) {
-    // If no async interaction ID, the response may have completed synchronously
-    // Generate an ID and return the response directly
-    const syntheticId = `dr-sync-${Date.now().toString(36)}`;
-    logger.info('Deep research completed synchronously', { interactionId: syntheticId });
-
-    // Cache the synchronous result for retrieval
-    _syncResults.set(syntheticId, {
-      text: response.text ?? '',
-      candidates: response.candidates,
-      usageMetadata: response.usageMetadata,
-    });
-
-    return syntheticId;
+  if (!interaction?.id) {
+    throw new Error(`Deep Research interaction did not return an id: ${JSON.stringify(interaction)}`);
   }
 
-  logger.info('Deep research interaction created', { interactionId });
-  return interactionId;
+  logger.info('Deep research interaction created', { interactionId: interaction.id });
+  return interaction.id;
 }
 
 // Cache for synchronous deep research results
@@ -607,7 +598,7 @@ export async function pollInteractionUntilComplete(
     _syncResults.delete(interactionId);
 
     const text = cached.text ?? '';
-    const sources = extractSourcesFromResponse(text, cached);
+    const sources = cached.sources ?? extractSourcesFromResponse(text, cached);
 
     return { text, sources };
   }
@@ -619,14 +610,13 @@ export async function pollInteractionUntilComplete(
 
       while (true) {
         try {
-          // Poll the operation status
-          const operation = await (client as any).operations?.get({ name: interactionId });
+          const interaction = await (client as any).interactions.get(interactionId);
 
-          if (!operation) {
-            throw new Error(`Could not retrieve operation: ${interactionId}`);
+          if (!interaction) {
+            throw new Error(`Could not retrieve interaction: ${interactionId}`);
           }
 
-          const status = operation.done ? 'completed' : (operation.metadata?.status ?? 'in_progress');
+          const status = interaction.status ?? 'in_progress';
 
           if (onProgress) {
             const elapsed = Math.round((Date.now() - startTime) / 1000);
@@ -639,16 +629,13 @@ export async function pollInteractionUntilComplete(
             elapsed: Math.round((Date.now() - startTime) / 1000),
           });
 
-          if (operation.done) {
-            if (operation.error) {
-              throw new Error(`Deep research failed: ${operation.error.message ?? JSON.stringify(operation.error)}`);
-            }
+          if (status === 'failed') {
+            throw new Error(`Deep research failed: ${interaction.error ?? 'Unknown error'}`);
+          }
 
-            const result = operation.response ?? operation.result;
-            const text = result?.text
-              ?? result?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text).join('')
-              ?? '';
-            const sources = extractSourcesFromResponse(text, result);
+          if (status === 'completed') {
+            const text = extractTextFromInteractionOutputs(interaction.outputs);
+            const sources = extractSourcesFromResponse(text, interaction);
 
             logger.info('Deep research completed', {
               interactionId,
@@ -678,6 +665,18 @@ export async function pollInteractionUntilComplete(
       message: `Deep research interaction ${interactionId} timed out after ${timeout}ms`,
     }
   );
+}
+
+function extractTextFromInteractionOutputs(outputs: Array<string | { text?: string; content?: string | unknown }> = []): string {
+  return outputs
+    .map((output) => {
+      if (typeof output === 'string') return output;
+      if (output?.text) return output.text;
+      if (output?.content) return typeof output.content === 'string' ? output.content : JSON.stringify(output.content);
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 /**
@@ -759,7 +758,7 @@ export interface GeneratedImage {
 export async function generateImage(
   prompt: string,
 ): Promise<GeneratedImage> {
-  const model = 'gemini-2.5-flash-image';
+  const model = 'gemini-3.1-flash-image';
 
   await geminiFlashRateLimiter.acquire();
 

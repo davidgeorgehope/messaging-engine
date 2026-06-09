@@ -59,7 +59,7 @@ Be specific. Include actual quotes with source URLs.`;
   const start = Date.now();
   
   const response = await client.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-flash-lite-latest',
     contents: [{ role: 'user', parts: [{ text: deepResearchPrompt }] }],
     config: {
       maxOutputTokens: 8192,

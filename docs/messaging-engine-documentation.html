@@ -450,45 +450,45 @@ interval/timeout</li>
 (60/min), Gemini Pro (15/min)</p>
 <h3 id="model-profile-system">Model Profile System</h3>
 <p>Controlled by <code>MODEL_PROFILE</code> env var
-(<code>&#39;production&#39;</code> | <code>&#39;test&#39;</code>).</p>
+(<code>&#39;economy&#39;</code> | <code>&#39;premium&#39;</code>).</p>
 <table>
 <thead>
 <tr>
 <th>Task</th>
-<th>Production Model</th>
-<th>Test Model</th>
+<th>Premium Model</th>
+<th>Economy Model</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>flash</td>
-<td>gemini-3-flash-preview</td>
-<td>gemini-2.5-flash</td>
+<td>gemini-flash-latest</td>
+<td>gemini-flash-lite-latest</td>
 </tr>
 <tr>
 <td>pro</td>
-<td>gemini-3-pro-preview</td>
-<td>gemini-2.5-flash</td>
+<td>gemini-pro-latest</td>
+<td>gemini-flash-lite-latest</td>
 </tr>
 <tr>
 <td>deepResearch</td>
-<td>deep-research-pro-preview</td>
-<td>gemini-2.5-flash</td>
+<td>deep-research-max-preview-04-2026</td>
+<td>gemini-flash-lite-latest</td>
 </tr>
 <tr>
 <td>generation</td>
-<td>gemini-3-pro-preview</td>
-<td>gemini-2.5-flash</td>
+<td>gemini-pro-latest</td>
+<td>gemini-flash-lite-latest</td>
 </tr>
 <tr>
 <td>scoring</td>
-<td>gemini-3-flash-preview</td>
-<td>gemini-2.5-flash</td>
+<td>gemini-flash-latest</td>
+<td>gemini-flash-lite-latest</td>
 </tr>
 <tr>
 <td>deslop</td>
-<td>gemini-3-pro-preview</td>
-<td>gemini-2.5-flash</td>
+<td>gemini-pro-latest</td>
+<td>gemini-flash-lite-latest</td>
 </tr>
 </tbody>
 </table>
@@ -2710,59 +2710,59 @@ failing scores → re-score → stop if plateau</li>
 <tr>
 <th>Step</th>
 <th>Model Task</th>
-<th>Production Model</th>
+<th>Premium Model</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Insight extraction</td>
 <td><code>flash</code></td>
-<td>gemini-3-flash-preview</td>
+<td>gemini-flash-latest</td>
 </tr>
 <tr>
 <td>Deep PoV extraction</td>
 <td><code>pro</code></td>
-<td>gemini-3-pro-preview</td>
+<td>gemini-pro-latest</td>
 </tr>
 <tr>
 <td>Session naming</td>
 <td><code>flash</code></td>
-<td>gemini-3-flash-preview</td>
+<td>gemini-flash-latest</td>
 </tr>
 <tr>
 <td>Banned words generation</td>
 <td><code>flash</code></td>
-<td>gemini-3-flash-preview</td>
+<td>gemini-flash-latest</td>
 </tr>
 <tr>
 <td>Community research</td>
 <td><code>deepResearch</code></td>
-<td>deep-research-pro-preview</td>
+<td>deep-research-max-preview-04-2026</td>
 </tr>
 <tr>
 <td>Competitive research</td>
 <td><code>deepResearch</code></td>
-<td>deep-research-pro-preview</td>
+<td>deep-research-max-preview-04-2026</td>
 </tr>
 <tr>
 <td>Content generation</td>
 <td><code>pro</code></td>
-<td>gemini-3-pro-preview</td>
+<td>gemini-pro-latest</td>
 </tr>
 <tr>
 <td>Attack prompts</td>
 <td><code>pro</code></td>
-<td>gemini-3-pro-preview</td>
+<td>gemini-pro-latest</td>
 </tr>
 <tr>
 <td>Scoring</td>
 <td>all 5 scorers</td>
-<td>gemini-3-flash-preview</td>
+<td>gemini-flash-latest</td>
 </tr>
 <tr>
 <td>Deslop</td>
 <td><code>deslop</code></td>
-<td>gemini-3-pro-preview</td>
+<td>gemini-pro-latest</td>
 </tr>
 </tbody>
 </table>
@@ -3290,9 +3290,7 @@ to Gemini</h3>
 on a single AI provider by default. Claude remains available as opt-in
 override.</p>
 <h3 id="model-profile-system-1">Model Profile System</h3>
-<p>Prevents accidental production model spend during testing.
-<code>MODEL_PROFILE=test</code> swaps all models to Gemini 2.5 Flash. A
-guard test fails if tests run against production models.</p>
+<p>Prevents accidental premium-model spend during testing. <code>MODEL_PROFILE=economy</code> uses cheaper latest Gemini aliases. A guard test fails if tests run against premium models.</p>
 <h3 id="sequential-dag-pipelines">Sequential DAG Pipelines</h3>
 <p>Pipelines refactored from parallel to sequential DAGs — each step
 feeds the next. Only multi-perspective retains parallel generation (3
@@ -3339,7 +3337,7 @@ workspace model.</p>
 <span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a><span class="ex">./deploy.sh</span></span>
 <span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a><span class="co"># Tests</span></span>
-<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> test                           <span class="co"># unit tests (MODEL_PROFILE=test)</span></span>
+<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> test                           <span class="co"># unit tests (MODEL_PROFILE=economy)</span></span>
 <span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> run test:e2e                   <span class="co"># e2e tests (5min timeout)</span></span></code></pre></div>
 <h3 id="key-environment-variables">Key Environment Variables</h3>
 <table>
@@ -3404,7 +3402,7 @@ workspace model.</p>
 <td><code>MODEL_PROFILE</code></td>
 <td>No</td>
 <td>production</td>
-<td><code>&#39;production&#39;</code> or <code>&#39;test&#39;</code></td>
+<td><code>&#39;economy&#39;</code> or <code>&#39;premium&#39;</code></td>
 </tr>
 <tr>
 <td><code>NODE_ENV</code></td>
@@ -3421,7 +3419,7 @@ test</li>
 <li><strong>Pool</strong>: forks (single fork — SQLite isn’t
 thread-safe)</li>
 <li><strong>Model profile</strong>: Tests run with
-<code>MODEL_PROFILE=test</code> (all Gemini 2.5 Flash)</li>
+<code>MODEL_PROFILE=economy</code> (all Gemini 2.5 Flash)</li>
 </ul>
 <p><strong>Test Categories</strong>:</p>
 <ul>

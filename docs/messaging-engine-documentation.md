@@ -102,16 +102,16 @@ Unified client layer with:
 
 ### Model Profile System
 
-Controlled by `MODEL_PROFILE` env var (`'production'` | `'test'`).
+Controlled by `MODEL_PROFILE` env var (`'economy'` | `'premium'`).
 
-| Task | Production Model | Test Model |
+| Task | Premium Model | Economy Model |
 |------|-----------------|------------|
-| flash | gemini-3-flash-preview | gemini-2.5-flash |
-| pro | gemini-3-pro-preview | gemini-2.5-flash |
-| deepResearch | deep-research-pro-preview | gemini-2.5-flash |
-| generation | gemini-3-pro-preview | gemini-2.5-flash |
-| scoring | gemini-3-flash-preview | gemini-2.5-flash |
-| deslop | gemini-3-pro-preview | gemini-2.5-flash |
+| flash | gemini-flash-latest | gemini-flash-lite-latest |
+| pro | gemini-pro-latest | gemini-flash-latest |
+| deepResearch | deep-research-max-preview-04-2026 | gemini-flash-latest |
+| generation | gemini-pro-latest | gemini-flash-latest |
+| scoring | gemini-flash-latest | gemini-flash-lite-latest |
+| deslop | gemini-pro-latest | gemini-flash-latest |
 
 Use `getModelForTask(task)` from `config.ts` — never hardcode model names.
 
@@ -664,18 +664,18 @@ The messaging engine has **5 generation pipelines**, each with different strateg
 
 ![Multi-Model Strategy](03-multi-model-strategy.png)
 
-| Step | Model Task | Production Model |
+| Step | Model Task | Premium Model |
 |------|-----------|-----------------|
-| Insight extraction | `flash` | gemini-3-flash-preview |
-| Deep PoV extraction | `pro` | gemini-3-pro-preview |
-| Session naming | `flash` | gemini-3-flash-preview |
-| Banned words generation | `flash` | gemini-3-flash-preview |
-| Community research | `deepResearch` | deep-research-pro-preview |
-| Competitive research | `deepResearch` | deep-research-pro-preview |
-| Content generation | `pro` | gemini-3-pro-preview |
-| Attack prompts | `pro` | gemini-3-pro-preview |
-| Scoring | all 5 scorers | gemini-3-flash-preview |
-| Deslop | `deslop` | gemini-3-pro-preview |
+| Insight extraction | `flash` | gemini-flash-latest |
+| Deep PoV extraction | `pro` | gemini-pro-latest |
+| Session naming | `flash` | gemini-flash-latest |
+| Banned words generation | `flash` | gemini-flash-latest |
+| Community research | `deepResearch` | deep-research-max-preview-04-2026 |
+| Competitive research | `deepResearch` | deep-research-max-preview-04-2026 |
+| Content generation | `pro` | gemini-pro-latest |
+| Attack prompts | `pro` | gemini-pro-latest |
+| Scoring | all 5 scorers | gemini-flash-latest |
+| Deslop | `deslop` | gemini-pro-latest |
 
 ### Pipeline 1: Standard
 
@@ -976,7 +976,7 @@ Workspace chat switched from Claude to Gemini Pro to keep the system on a single
 
 ### Model Profile System
 
-Prevents accidental production model spend during testing. `MODEL_PROFILE=test` swaps all models to Gemini 2.5 Flash. A guard test fails if tests run against production models.
+Prevents accidental premium-model spend during testing. `MODEL_PROFILE=economy` uses cheaper latest Gemini aliases. A guard test fails if tests run against premium models unintentionally.
 
 ### Sequential DAG Pipelines
 
@@ -1026,7 +1026,7 @@ cd admin && npm install && npm run build && cd ..
 ./deploy.sh
 
 # Tests
-npm test                           # unit tests (MODEL_PROFILE=test)
+npm test                           # unit tests (MODEL_PROFILE=economy)
 npm run test:e2e                   # e2e tests (5min timeout)
 ```
 
@@ -1041,14 +1041,14 @@ npm run test:e2e                   # e2e tests (5min timeout)
 | `JWT_SECRET` | Yes | — | JWT signing secret |
 | `ADMIN_USERNAME` | Yes | — | Default admin username |
 | `ADMIN_PASSWORD` | Yes | — | Default admin password |
-| `MODEL_PROFILE` | No | production | `'production'` or `'test'` |
+| `MODEL_PROFILE` | No | economy | `'economy'` or `'premium'` |
 | `NODE_ENV` | No | development | Environment mode |
 
 ### Testing
 
 - **Framework**: Vitest with 5-minute timeout per test
 - **Pool**: forks (single fork — SQLite isn't thread-safe)
-- **Model profile**: Tests run with `MODEL_PROFILE=test` (all Gemini 2.5 Flash)
+- **Model profile**: Tests run with `MODEL_PROFILE=economy` (latest lower-cost Gemini aliases)
 
 **Test Categories**:
 
@@ -1101,7 +1101,7 @@ These patterns are learned from the project's evolution. Violating them has caus
 
 9. **Evidence retries are layered** — Grounded search: 5x. Community deep research: 3x. Separate retry loops at different levels.
 
-10. **Test profile guard** — `model-profile-guard.test.ts` fails if tests hit production models.
+10. **Economy profile guard** — `model-profile-guard.test.ts` fails if tests hit premium models unintentionally.
 
 ### Key File Locations
 

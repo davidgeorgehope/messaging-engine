@@ -273,7 +273,7 @@ User creates session (POST /api/workspace/sessions)
 
 - **Framework**: Vitest with 5-minute timeout per test
 - **Pool**: forks (single fork — SQLite isn't thread-safe)
-- **Model profile**: Tests run with `MODEL_PROFILE=test` (all Gemini 2.5 Flash)
+- **Model profile**: Tests run with `MODEL_PROFILE=economy` (latest lower-cost Gemini aliases)
 
 ### Test Categories
 
@@ -348,7 +348,7 @@ Workspace chat originally used Claude for streaming responses. This was switched
 
 ### Model Profile System (`87981d0`, `34aaa9b`)
 
-Created to prevent accidental production model spend during testing. `MODEL_PROFILE=test` swaps all models to Gemini 2.5 Flash. A guard test (`model-profile-guard.test.ts`) fails if tests run against production models. The config auto-detects the Vitest environment and defaults to test profile.
+Created to prevent accidental premium-model spend during testing. `MODEL_PROFILE=economy` swaps expensive tasks to lower-cost latest Gemini aliases. A guard test (`model-profile-guard.test.ts`) fails if tests run against premium models. The config defaults to the economy profile.
 
 ### Split Research Pipeline Removed (`a622121`)
 

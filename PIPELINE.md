@@ -297,18 +297,18 @@ All actions are executed via `runActionInBackground()` which creates an `action_
 
 ## Model Usage by Pipeline Step
 
-| Step | Model Task | Production Model |
+| Step | Model Task | Premium Model |
 |------|-----------|-----------------|
-| Insight extraction | `flash` | gemini-3-flash-preview |
-| Deep PoV extraction | `pro` | gemini-3-pro-preview |
-| Session naming | `flash` | gemini-3-flash-preview |
-| Banned words generation | `flash` | gemini-3-flash-preview |
-| Community research | `deepResearch` | deep-research-pro-preview |
-| Competitive research | `deepResearch` | deep-research-pro-preview |
-| Grounded search | `flash` | gemini-3-flash-preview |
-| Content generation | `pro` (or selected model) | gemini-3-pro-preview |
-| Attack prompts | `pro` | gemini-3-pro-preview |
-| Refinement | selected model | gemini-3-pro-preview |
-| Scoring | all 5 scorers | gemini-3-flash-preview |
-| Deslop | `deslop` | gemini-3-pro-preview |
-| JSON generation | `pro` | gemini-3-pro-preview |
+| Insight extraction | `flash` | gemini-flash-latest |
+| Deep PoV extraction | `pro` | gemini-pro-latest |
+| Session naming | `flash` | gemini-flash-latest |
+| Banned words generation | `flash` | gemini-flash-latest |
+| Community research | `deepResearch` | deep-research-max-preview-04-2026 |
+| Competitive research | `deepResearch` | deep-research-max-preview-04-2026 |
+| Grounded search | `flash` | gemini-flash-latest |
+| Content generation | `pro` (or selected model) | gemini-pro-latest |
+| Attack prompts | `pro` | gemini-pro-latest |
+| Refinement | selected model | gemini-pro-latest |
+| Scoring | all 5 scorers | gemini-flash-latest |
+| Deslop | `deslop` | gemini-pro-latest |
+| JSON generation | `pro` | gemini-pro-latest |

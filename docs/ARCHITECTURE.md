@@ -11,7 +11,7 @@ The PMM Messaging Engine converts product documentation into scored, quality-tes
 | Backend | Hono (REST API), TypeScript |
 | Frontend | Vite + React + Tailwind CSS |
 | Database | SQLite + Drizzle ORM |
-| AI Models | Gemini 3 Pro/Flash (production), Gemini 2.5 Flash (test) |
+| AI Models | Gemini latest aliases (premium), Gemini Flash/Flash-Lite latest aliases (economy) |
 
 ## File Structure
 
@@ -73,14 +73,14 @@ src/
 
 Two profiles controlled by `MODEL_PROFILE` env var:
 
-| Task | Production | Test |
+| Task | Premium | Economy |
 |------|-----------|------|
-| flash | gemini-3-flash-preview | gemini-2.5-flash |
-| pro | gemini-3-pro-preview | gemini-2.5-flash |
-| deepResearch | deep-research-pro-preview-12-2025 | gemini-2.5-flash |
-| generation | gemini-3-pro-preview | gemini-2.5-flash |
-| scoring | gemini-3-flash-preview | gemini-2.5-flash |
-| deslop | gemini-3-pro-preview | gemini-2.5-flash |
+| flash | gemini-flash-latest | gemini-flash-lite-latest |
+| pro | gemini-pro-latest | gemini-flash-latest |
+| deepResearch | deep-research-max-preview-04-2026 | gemini-flash-latest |
+| generation | gemini-pro-latest | gemini-flash-latest |
+| scoring | gemini-flash-latest | gemini-flash-lite-latest |
+| deslop | gemini-pro-latest | gemini-flash-latest |
 
 Test profile uses a single cheap model for all tasks — ideal for development and CI.
 

@@ -65,9 +65,9 @@ export const config = {
       model: 'claude-opus-4-6',
     },
     gemini: {
-      flashModel: 'gemini-3-flash-preview',
-      proModel: 'gemini-3-pro-preview',
-      deepResearchAgent: 'deep-research-pro-preview',
+      flashModel: 'gemini-flash-latest',
+      proModel: 'gemini-pro-latest',
+      deepResearchAgent: 'deep-research-max-preview-04-2026',
     },
   },
 
@@ -155,20 +155,20 @@ export type ModelTask = 'flash' | 'pro' | 'deepResearch' | 'generation' | 'scori
 
 const MODEL_PROFILES: Record<ModelProfile, Record<ModelTask, string>> = {
   premium: {
-    flash: 'gemini-3-flash-preview',
-    pro: 'gemini-3-pro-preview',
-    deepResearch: 'deep-research-pro-preview',
-    generation: 'gemini-3-pro-preview',
-    scoring: 'gemini-3-flash-preview',
-    deslop: 'gemini-3-pro-preview',
+    flash: 'gemini-flash-latest',
+    pro: 'gemini-pro-latest',
+    deepResearch: 'deep-research-max-preview-04-2026',
+    generation: 'gemini-pro-latest',
+    scoring: 'gemini-flash-latest',
+    deslop: 'gemini-pro-latest',
   },
   economy: {
-    flash: 'gemini-2.5-flash',
-    pro: 'gemini-2.5-flash',
-    deepResearch: 'gemini-2.5-flash',
-    generation: 'gemini-2.5-flash',
-    scoring: 'gemini-2.5-flash',
-    deslop: 'gemini-2.5-flash',
+    flash: 'gemini-flash-lite-latest',
+    pro: 'gemini-flash-latest',
+    deepResearch: 'gemini-flash-latest',
+    generation: 'gemini-flash-latest',
+    scoring: 'gemini-flash-lite-latest',
+    deslop: 'gemini-flash-latest',
   },
 };
 

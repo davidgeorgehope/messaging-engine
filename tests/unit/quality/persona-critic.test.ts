@@ -8,12 +8,12 @@ vi.mock('../../../src/services/ai/clients.js', () => ({
       { name: 'Busy Dev', prompt: 'You are a busy developer. Score this 0-10.' },
     ],
     usage: { inputTokens: 100, outputTokens: 200 },
-    model: 'gemini-2.5-flash',
+    model: 'gemini-flash-lite-latest',
   }),
 }));
 
 vi.mock('../../../src/config.js', () => ({
-  getModelForTask: vi.fn().mockReturnValue('gemini-2.5-flash'),
+  getModelForTask: vi.fn().mockReturnValue('gemini-flash-lite-latest'),
 }));
 
 vi.mock('../../../src/utils/logger.js', () => ({
@@ -42,7 +42,7 @@ describe('persona-critic', () => {
         { name: 'Busy Dev', prompt: 'You are a busy developer. Score this 0-10.' },
       ],
       usage: { inputTokens: 100, outputTokens: 200 },
-      model: 'gemini-2.5-flash',
+      model: 'gemini-flash-lite-latest',
     } as any);
   });
 
@@ -52,7 +52,7 @@ describe('persona-critic', () => {
       vi.mocked(generateJSON).mockResolvedValue({
         data: { score: 7, feedback: 'Decent', strengths: ['clear'], weaknesses: ['vague'] },
         usage: { inputTokens: 50, outputTokens: 100 },
-        model: 'gemini-2.5-flash',
+        model: 'gemini-flash-lite-latest',
       } as any);
 
       const results = await runPersonaCritics('Test messaging content');
@@ -68,7 +68,7 @@ describe('persona-critic', () => {
       vi.mocked(generateJSON).mockResolvedValue({
         data: { score: 5, feedback: 'ok', strengths: [], weaknesses: [] },
         usage: { inputTokens: 50, outputTokens: 100 },
-        model: 'gemini-2.5-flash',
+        model: 'gemini-flash-lite-latest',
       } as any);
 
       const results = await runPersonaCritics('content');
@@ -95,14 +95,14 @@ describe('persona-critic', () => {
               { name: 'Busy Dev', prompt: 'Score 0-10.' },
             ],
             usage: { inputTokens: 100, outputTokens: 200 },
-            model: 'gemini-2.5-flash',
+            model: 'gemini-flash-lite-latest',
           } as any;
         }
         // Scoring calls
         return {
           data: { score: 7, feedback: 'Good', strengths: ['solid'], weaknesses: ['could improve'] },
           usage: { inputTokens: 50, outputTokens: 100 },
-          model: 'gemini-2.5-flash',
+          model: 'gemini-flash-lite-latest',
         } as any;
       });
 
@@ -128,13 +128,13 @@ describe('persona-critic', () => {
               { name: 'Persona C', prompt: 'Score 0-10.' },
             ],
             usage: { inputTokens: 100, outputTokens: 200 },
-            model: 'gemini-2.5-flash',
+            model: 'gemini-flash-lite-latest',
           } as any;
         }
         return {
           data: { score: 6, feedback: 'Ok', strengths: [], weaknesses: [] },
           usage: { inputTokens: 50, outputTokens: 100 },
-          model: 'gemini-2.5-flash',
+          model: 'gemini-flash-lite-latest',
         } as any;
       });
 
@@ -158,7 +158,7 @@ describe('persona-critic', () => {
         return {
           data: { score: 5, feedback: 'Fallback', strengths: [], weaknesses: [] },
           usage: { inputTokens: 50, outputTokens: 100 },
-          model: 'gemini-2.5-flash',
+          model: 'gemini-flash-lite-latest',
         } as any;
       });
 
@@ -183,7 +183,7 @@ describe('persona-critic', () => {
               { name: 'Ugly', prompt: 'Score 0-10.' },
             ],
             usage: { inputTokens: 100, outputTokens: 200 },
-            model: 'gemini-2.5-flash',
+            model: 'gemini-flash-lite-latest',
           } as any;
         }
         if (callCount === 3) {
@@ -193,7 +193,7 @@ describe('persona-critic', () => {
         return {
           data: { score: 8, feedback: 'Great', strengths: ['a'], weaknesses: ['b'] },
           usage: { inputTokens: 50, outputTokens: 100 },
-          model: 'gemini-2.5-flash',
+          model: 'gemini-flash-lite-latest',
         } as any;
       });
 
