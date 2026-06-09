@@ -396,7 +396,7 @@ Product doc layering in the outside-in pipeline was removed because it overrode 
 Gemini grounded search returns 200 OK with 0 results non-deterministically. Always retry (currently 5x). Same prompt returns rich results on retry.
 
 ### Domain-Agnostic Prompts Only
-No hardcoded domain language (SRE, observability, etc.) in prompts. All domain context comes from extracted insights. The engine works for any product.
+No hardcoded vertical, practitioner, or product-category language in prompts. All domain context comes from extracted insights. The engine works for any product.
 
 ### Process Stability: No File Watchers in Production
 PM2 with `tsx watch` caused EADDRINUSE crashes during in-flight Deep Research. Use `node dist/index.js` in production.

@@ -72,9 +72,9 @@ describe('persona-critic', () => {
       } as any);
 
       const results = await runPersonaCritics('content');
-      // Verify no SRE/observability/DevOps hardcoded references
+      // Verify no hardcoded practitioner or vertical references
       for (const r of results) {
-        expect(r.personaName).not.toMatch(/SRE|DevOps|O11y|observability/i);
+        expect(r.personaName).not.toMatch(/specialist|architect|analyst|manager/i);
       }
     });
   });

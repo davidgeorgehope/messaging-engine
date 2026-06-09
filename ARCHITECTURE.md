@@ -324,7 +324,7 @@ The scrapers were deleted (-1,109 lines). Deep Research is now the sole evidence
 
 ### Domain-Agnostic Prompts (`4d976b9`)
 
-All prompts originally had hardcoded observability/SRE language baked in. This was replaced with domain-agnostic language that infers the product domain from extracted insights. The engine now works for any product domain.
+All prompts originally had hardcoded vertical and practitioner language baked in. This was replaced with domain-agnostic language that infers the product domain from extracted insights. The engine now works for any product domain.
 
 ### Dynamic Banned Words (`7afe971`, `0eef476`)
 

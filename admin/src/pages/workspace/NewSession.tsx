@@ -402,7 +402,7 @@ export default function NewSession() {
               onChange={(e) => setFocusInstructions(e.target.value)}
               rows={3}
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
-              placeholder="e.g., Focus on migration pain from Elasticsearch, emphasize cost savings..."
+              placeholder="e.g., Focus on migration pain from legacy tools, emphasize cost savings..."
             />
           </section>
         )}

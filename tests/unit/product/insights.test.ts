@@ -24,15 +24,15 @@ import {
 // Fixtures
 // ---------------------------------------------------------------------------
 const fullInsights: ExtractedInsights = {
-  productCapabilities: ['Log ingestion at 1TB/day', 'Real-time alerting'],
-  keyDifferentiators: ['10x cheaper than Splunk', 'No vendor lock-in'],
-  targetPersonas: ['SRE teams', 'Platform engineers'],
-  painPointsAddressed: ['Alert fatigue from noisy dashboards', 'Slow query times on large datasets'],
-  claimsAndMetrics: ['99.9% uptime SLA', '50ms p95 query latency'],
-  technicalDetails: ['Built on ClickHouse', 'OpenTelemetry native'],
-  summary: 'An observability platform that ingests logs, metrics, and traces at scale.',
-  domain: 'observability',
-  category: 'log management',
+  productCapabilities: ['Invoice matching', 'Approval routing'],
+  keyDifferentiators: ['10x faster reconciliation', 'No vendor lock-in'],
+  targetPersonas: ['Finance teams', 'Operations managers'],
+  painPointsAddressed: ['Manual approval bottlenecks', 'Slow exception handling on large datasets'],
+  claimsAndMetrics: ['99.9% uptime SLA', '50ms p95 lookup latency'],
+  technicalDetails: ['Built on a columnar analytics store', 'API-first integrations'],
+  summary: 'Finance automation for invoice matching and approvals.',
+  domain: 'finance automation',
+  category: 'invoice workflow',
   productType: 'SaaS platform',
 };
 
@@ -65,7 +65,7 @@ describe('extractInsights', () => {
 
     expect(result).not.toBeNull();
     expect(result!.productCapabilities).toEqual(fullInsights.productCapabilities);
-    expect(result!.domain).toBe('observability');
+    expect(result!.domain).toBe('finance automation');
   });
 
   it('strips code-fence wrapping', async () => {
@@ -77,7 +77,7 @@ describe('extractInsights', () => {
     const result = await extractInsights('docs');
 
     expect(result).not.toBeNull();
-    expect(result!.domain).toBe('observability');
+    expect(result!.domain).toBe('finance automation');
   });
 
   it('returns null on AI failure', async () => {
@@ -170,8 +170,8 @@ describe('formatInsightsForDiscovery', () => {
   it('produces short output with domain/category/type', () => {
     const result = formatInsightsForDiscovery(fullInsights);
 
-    expect(result).toContain('observability');
-    expect(result).toContain('log management');
+    expect(result).toContain('finance automation');
+    expect(result).toContain('invoice workflow');
     expect(result).toContain('SaaS platform');
     expect(result.length).toBeLessThan(200);
   });
@@ -204,7 +204,7 @@ describe('formatInsightsForScoring', () => {
     const result = formatInsightsForScoring(fullInsights);
 
     expect(result).toContain('Capabilities:');
-    expect(result).toContain('Log ingestion at 1TB/day');
+    expect(result).toContain('Invoice matching');
     expect(result).toContain('Claims & Metrics:');
     expect(result).toContain('99.9% uptime SLA');
   });
@@ -213,7 +213,7 @@ describe('formatInsightsForScoring', () => {
     const result = formatInsightsForScoring(fullInsights);
 
     expect(result).toContain('Differentiators:');
-    expect(result).toContain('10x cheaper than Splunk');
+    expect(result).toContain('10x faster reconciliation');
   });
 
   it('returns empty string when all arrays are empty', () => {

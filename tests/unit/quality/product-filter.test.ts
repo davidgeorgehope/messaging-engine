@@ -25,7 +25,7 @@ describe('analyzeSpecificity product filtering', () => {
     mockGenerateJSON.mockResolvedValue({
       data: {
         score: 7,
-        concreteClaims: ['Uses OpenTelemetry collectors'],
+        concreteClaims: ['Syncs approval status across connected systems'],
         vagueClaims: [],
         assessment: 'Content is specific.',
       },
@@ -37,7 +37,7 @@ describe('analyzeSpecificity product filtering', () => {
 
     expect(result).toEqual({
       score: 7,
-      concreteClaims: ['Uses OpenTelemetry collectors'],
+      concreteClaims: ['Syncs approval status across connected systems'],
       vagueClaims: [],
       assessment: 'Content is specific.',
     });
@@ -64,10 +64,10 @@ describe('analyzeSpecificity product filtering', () => {
   });
 
   it('should include the content in the prompt', async () => {
-    await analyzeSpecificity('Specific messaging about OpenTelemetry', ['doc']);
+    await analyzeSpecificity('Specific messaging about approval routing', ['doc']);
 
     const prompt = mockGenerateJSON.mock.calls[0][0] as string;
-    expect(prompt).toContain('Specific messaging about OpenTelemetry');
+    expect(prompt).toContain('Specific messaging about approval routing');
   });
 
   it('should return fallback scores when AI call fails', async () => {

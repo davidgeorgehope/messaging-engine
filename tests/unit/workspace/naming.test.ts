@@ -73,16 +73,16 @@ import type { AssetType } from '../../../src/services/generation/types.js';
 const mockedGenerate = vi.mocked(generateWithGemini);
 
 const SAMPLE_INSIGHTS: ExtractedInsights = {
-  summary: "One Workflow is Elastic's native automation engine that integrates workflow capabilities across Security and Observability",
-  domain: 'Security and Observability',
-  category: 'Workflow Automation / SOAR / AIOps',
+  summary: "CaseFlow is Acme's workflow automation engine that coordinates approvals, escalations, and handoffs across customer operations",
+  domain: 'Customer Operations',
+  category: 'Workflow Automation / Case Management',
   productType: 'SaaS platform',
-  productCapabilities: ['Automated incident response', 'Cross-domain correlation', 'Playbook orchestration'],
-  keyDifferentiators: ['Native integration with Elastic Stack'],
-  targetPersonas: ['Security analysts', 'SREs', 'Platform engineers'],
-  painPointsAddressed: ['Tool sprawl', 'Manual incident triage'],
-  claimsAndMetrics: ['50% reduction in MTTR'],
-  technicalDetails: ['Built on Elasticsearch'],
+  productCapabilities: ['Automated approvals', 'Cross-team handoffs', 'Workflow orchestration'],
+  keyDifferentiators: ['Native integration with existing business systems'],
+  targetPersonas: ['Operations leaders', 'Customer support managers', 'RevOps teams'],
+  painPointsAddressed: ['Tool sprawl', 'Manual case routing'],
+  claimsAndMetrics: ['50% reduction in handling time'],
+  technicalDetails: ['API-first workflow engine'],
 };
 
 describe('nameSessionFromInsights', () => {

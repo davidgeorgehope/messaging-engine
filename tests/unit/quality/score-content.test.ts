@@ -178,7 +178,7 @@ describe('score-content', () => {
     it('forwards personaContext to runPersonaCritics when provided', async () => {
       const personaContext = {
         domain: 'security',
-        category: 'SIEM',
+        category: 'case management',
         targetPersonas: ['Security Analyst'],
         painPointsAddressed: ['Alert fatigue'],
         productName: 'TestProduct',

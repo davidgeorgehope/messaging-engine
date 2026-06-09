@@ -42,7 +42,7 @@ describe('Community Evidence Search', () => {
     console.log(`Context text length: ${evidence.communityContextText.length}`);
     console.log(`Source counts:`, evidence.sourceCounts);
 
-    // The whole point: community pain about SOAR/workflow fragmentation EXISTS
+    // The whole point: community pain about workflow fragmentation EXISTS
     expect(evidence.evidenceLevel).not.toBe('product-only');
     expect(evidence.communityPostCount).toBeGreaterThan(0);
     expect(evidence.communityContextText.length).toBeGreaterThan(100);
@@ -66,7 +66,7 @@ describe('Community Evidence Search', () => {
   it('finds evidence with explicit prompt override', async () => {
     const evidence = await runCommunityDeepResearch(
       insights,
-      'Focus on SOAR tool fragmentation and the pain of having separate SIEM, observability, and automation platforms'
+      'Focus on workflow tool fragmentation and the pain of having separate intake, approval, and automation platforms'
     );
 
     console.log(`Prompted evidence level: ${evidence.evidenceLevel}`);

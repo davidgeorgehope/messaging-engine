@@ -130,8 +130,8 @@ describe('E2E Pipeline', () => {
 
     it('contains expected domain keywords', () => {
       const text = extractedText.toLowerCase();
-      // At least some of these should appear in a product/observability PDF
-      const keywords = ['log', 'data', 'search', 'monitor', 'observ', 'alert', 'metric', 'trace', 'pipeline', 'event', 'workflow', 'ingest'];
+      // At least some of these should appear in a product PDF
+      const keywords = ['data', 'search', 'workflow', 'automation', 'approval', 'customer', 'team', 'platform', 'process', 'integration', 'insight'];
       const found = keywords.filter(kw => text.includes(kw));
       console.log(`  Keywords found: ${found.join(', ')}`);
       expect(found.length).toBeGreaterThanOrEqual(3);

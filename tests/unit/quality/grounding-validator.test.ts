@@ -45,7 +45,7 @@ describe('grounding-validator', () => {
       vi.mocked(generateJSON).mockResolvedValue({
         data: {
           fabricatedReferences: [
-            'Fake Reddit quote about monitoring tools',
+            'Fake Reddit quote about approval tools',
             'Invented HN discussion about deployment',
           ],
           cleanedContent: 'Clean content without fabrications',
@@ -54,12 +54,12 @@ describe('grounding-validator', () => {
         model: 'gemini-2.5-flash',
       } as any);
 
-      const result = await validateGrounding('Content with fake quotes from r/devops', 'product-only');
+      const result = await validateGrounding('Content with fake quotes from r/productmanagement', 'product-only');
 
       expect(result.hasFabricationPatterns).toBe(true);
       expect(result.fabricationCount).toBe(2);
       expect(result.matchedPatterns).toEqual([
-        'Fake Reddit quote about monitoring tools',
+        'Fake Reddit quote about approval tools',
         'Invented HN discussion about deployment',
       ]);
       expect(result.strippedContent).toBe('Clean content without fabrications');

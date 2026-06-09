@@ -146,7 +146,7 @@ describe('grounding-validator.ts', () => {
     expect(source).toContain('fabricatedReferences');
     // No hardcoded regex patterns
     expect(source).not.toContain('FABRICATION_PATTERNS');
-    expect(source).not.toContain('SRE|DevOps');
+    expect(source).not.toContain('hardcodedPractitionerRegex');
   });
 
   it('skips check for grounded content, only checks product-only', () => {

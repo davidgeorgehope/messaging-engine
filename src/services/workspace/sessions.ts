@@ -528,7 +528,7 @@ export async function nameSessionFromInsights(jobId: string, insights: Extracted
     .filter(p => p && p !== 'unknown').join(' / ');
 
   try {
-    const prompt = `Generate a concise 3-6 word name for a messaging session about this topic.\nTopic: ${topic}${domainInfo ? `\nDomain: ${domainInfo}` : ''}\nAsset types: ${assetTypeLabels}\nUse the functional domain (what the product does), not brand names.\nExamples: 'Log Pipeline Cost Battlecard', 'Workflow Automation Narrative', 'Alert Fatigue Launch Pack', 'SOAR Integration Messaging'\nReturn ONLY the name, nothing else.`;
+    const prompt = `Generate a concise 3-6 word name for a messaging session about this topic.\nTopic: ${topic}${domainInfo ? `\nDomain: ${domainInfo}` : ''}\nAsset types: ${assetTypeLabels}\nUse the functional domain (what the product does), not brand names.\nExamples: 'Approval Flow Battlecard', 'Workflow Automation Narrative', 'Case Handoff Launch Pack', 'Operations Efficiency Messaging'\nReturn ONLY the name, nothing else.`;
 
     logger.debug('Naming prompt', { jobId, prompt: prompt.substring(0, 200) });
 

@@ -1,4 +1,4 @@
-// Slop detector — forked from o11y.tips deslop.ts
+// Slop detector for identifying generic, over-polished AI copy
 // Pattern detection + AI analysis + deslop function
 // Detects hedging, filler transitions, overused phrases, fake enthusiasm, and cliches
 

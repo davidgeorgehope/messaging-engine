@@ -49,7 +49,7 @@ This skill defines how to write product messaging that sounds like it was writte
 #### Feature Dumping
 - Don't list features without connecting them to pain
 - Every feature mention should answer "so what?" for the practitioner
-- "We support OpenTelemetry" → "Your existing OTel instrumentation works out of the box — no proprietary agents"
+- "We integrate with your stack" → "Your existing systems keep working — no rip-and-replace migration"
 
 ### 6. Voice Calibration by Context
 

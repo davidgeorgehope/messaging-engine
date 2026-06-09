@@ -33,7 +33,7 @@ export async function extractInsights(productDocs: string): Promise<ExtractedIns
 ${truncated}
 
 Return a JSON object with these fields:
-- "productName": the official product name exactly as it should appear in generated content (e.g. "Datadog", "Grafana Cloud", "PagerDuty"). Extract the exact name from the docs — never invent or abbreviate it.
+- "productName": the official product name exactly as it should appear in generated content (e.g. "AcmeFlow", "Northstar Analytics", "RelayDesk"). Extract the exact name from the docs — never invent or abbreviate it.
 - "productCapabilities": array of specific product capabilities/features (max 12)
 - "keyDifferentiators": array of what makes this product different from alternatives (max 8)
 - "targetPersonas": array of who this product is for, with their roles and concerns (max 6)
@@ -41,8 +41,8 @@ Return a JSON object with these fields:
 - "claimsAndMetrics": array of concrete claims, numbers, benchmarks, or performance metrics (max 10)
 - "technicalDetails": array of important technical details, integrations, or architecture notes (max 8)
 - "summary": a 2-3 sentence summary of what this product does and why it matters
-- "domain": the broad industry domain (e.g. "observability", "security", "databases", "CI/CD")
-- "category": the product category within that domain (e.g. "log management", "SIEM", "APM")
+- "domain": the broad industry domain (e.g. "security", "analytics", "finance", "developer tools")
+- "category": the product category within that domain (e.g. "workflow automation", "customer analytics", "payments orchestration")
 - "productType": the type of product (e.g. "SaaS platform", "open-source tool", "managed service", "on-prem appliance")
 
 Be specific. Extract actual details, not generic descriptions. If the docs mention specific numbers, include them.
@@ -256,7 +256,7 @@ export async function extractDeepPoV(productDocs: string): Promise<DeepPoVInsigh
 ${truncated}
 
 Return a JSON object with these fields:
-- "productName": the official product name exactly as it should appear in generated content (e.g. "Datadog", "Grafana Cloud", "PagerDuty"). Extract the exact name from the docs — never invent or abbreviate it.
+- "productName": the official product name exactly as it should appear in generated content (e.g. "AcmeFlow", "Northstar Analytics", "RelayDesk"). Extract the exact name from the docs — never invent or abbreviate it.
 - "productCapabilities": array of specific product capabilities/features (max 12)
 - "keyDifferentiators": array of what makes this product different from alternatives (max 8)
 - "targetPersonas": array of who this product is for, with their roles and concerns (max 6)
@@ -264,7 +264,7 @@ Return a JSON object with these fields:
 - "claimsAndMetrics": array of concrete claims, numbers, benchmarks, or performance metrics (max 10)
 - "technicalDetails": array of important technical details, integrations, or architecture notes (max 8)
 - "summary": a 2-3 sentence summary of what this product does and why it matters
-- "domain": the broad industry domain (e.g. "observability", "security", "databases", "CI/CD")
+- "domain": the broad industry domain (e.g. "security", "analytics", "finance", "developer tools")
 - "category": the product category within that domain
 - "productType": the type of product (e.g. "SaaS platform", "open-source tool")
 - "thesis": The product's core argument in 1-2 sentences. What is this product's OPINION about how things should work? Not features — the belief system.

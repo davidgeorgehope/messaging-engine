@@ -42,7 +42,7 @@ ${discoveryContext}
 
 ## Output Format
 Organize findings as:
-- **Practitioner Quotes**: Verbatim quotes from real community posts (include source URL and community name like "Reddit r/devops" or "HN comment")
+- **Practitioner Quotes**: Verbatim quotes from real community posts (include source URL and community name like "Reddit r/productmanagement" or "HN comment")
 - **Common Pain Points**: Recurring themes across communities
 - **Wished-For Solutions**: What practitioners say they want
 - **Language Patterns**: The specific words and phrases practitioners use (not vendor language)
