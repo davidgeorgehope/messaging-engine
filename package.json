@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "PMM Messaging Engine — converts practitioner pain points into scored, traceable messaging assets",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
@@ -24,8 +27,8 @@
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.7",
-    "drizzle-orm": "^0.38.3",
-    "hono": "^4.6.0",
+    "drizzle-orm": "0.45.2",
+    "hono": "^4.13.11",
     "jose": "^5.9.6",
     "pdf-parse": "^2.4.5",
     "zod": "^4.3.6"
@@ -38,5 +41,8 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^4.0.18"
+  },
+  "overrides": {
+    "shell-quote": "1.11.0"
   }
 }
