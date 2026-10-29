@@ -1,6 +1,5 @@
-import { GoogleGenAI } from '@google/genai';
 import { config, getModelForTask } from '../../config.js';
-import { generateWithGeminiGroundedSearch } from '../ai/clients.js';
+import { generateWithGeminiGroundedSearch, getGoogleClient } from '../ai/clients.js';
 import { createLogger } from '../../utils/logger.js';
 import type { SearchResult } from '../ai/types.js';
 
@@ -9,8 +8,8 @@ const logger = createLogger('research:deep-research');
 const POLL_INTERVAL_MS = config.deepResearch.pollIntervalMs;
 const MAX_DURATION_MS = config.deepResearch.timeoutMs;
 
-function getClient(): GoogleGenAI {
-  return new GoogleGenAI({ apiKey: config.apiKeys.googleAi });
+function getClient() {
+  return getGoogleClient();
 }
 
 export async function createDeepResearchInteraction(prompt: string): Promise<string> {
