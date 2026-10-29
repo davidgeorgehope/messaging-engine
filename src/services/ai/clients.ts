@@ -1,5 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
-import { GoogleGenAI } from '@google/genai';
+import { createXaiGeminiClient, createXaiAnthropicClient, XAI_IMAGE_MODEL } from './xai.js';
 import { config, getModelForTask } from '../../config.js';
 import { createLogger } from '../../utils/logger.js';
 import { withRetry, withTimeout, createRateLimiter } from '../../utils/retry.js';
@@ -26,26 +25,17 @@ const geminiProRateLimiter = createRateLimiter({ maxRequests: 15, windowMs: 6000
 // ---------------------------------------------------------------------------
 // Lazy-initialized clients
 // ---------------------------------------------------------------------------
-let anthropicClient: Anthropic | null = null;
-let googleClient: GoogleGenAI | null = null;
+let anthropicClient: ReturnType<typeof createXaiAnthropicClient> | null = null;
+let googleClient: ReturnType<typeof createXaiGeminiClient> | null = null;
 
-function getAnthropicClient(): Anthropic {
-  if (!anthropicClient) {
-    if (!config.apiKeys.anthropic) {
-      throw new Error('ANTHROPIC_API_KEY is not configured');
-    }
-    anthropicClient = new Anthropic({ apiKey: config.apiKeys.anthropic });
-  }
+// Both legacy client slots now route to xAI (Grok); see ./xai.ts.
+function getAnthropicClient() {
+  if (!anthropicClient) anthropicClient = createXaiAnthropicClient();
   return anthropicClient;
 }
 
-function getGoogleClient(): GoogleGenAI {
-  if (!googleClient) {
-    if (!config.apiKeys.googleAi) {
-      throw new Error('GOOGLE_AI_API_KEY is not configured');
-    }
-    googleClient = new GoogleGenAI({ apiKey: config.apiKeys.googleAi });
-  }
+export function getGoogleClient() {
+  if (!googleClient) googleClient = createXaiGeminiClient();
   return googleClient;
 }
 
@@ -128,7 +118,8 @@ export async function generateWithClaude(
   prompt: string,
   options: GenerateOptions = {}
 ): Promise<AIResponse> {
-  const model = options.model ?? config.ai.claude.model;
+  // Legacy Claude model ids (e.g. from saved UI selections) map to the xAI flagship.
+  const model = options.model && !options.model.includes('claude') ? options.model : config.ai.claude.model;
   const maxTokens = options.maxTokens ?? 16384;
 
   await claudeRateLimiter.acquire();
@@ -147,7 +138,6 @@ export async function generateWithClaude(
           temperature: options.temperature ?? 0.7,
           system: options.systemPrompt ?? '',
           messages: [{ role: 'user', content: prompt }],
-          ...(options.stopSequences ? { stop_sequences: options.stopSequences } : {}),
         });
       },
       {
@@ -172,7 +162,7 @@ export async function generateWithClaude(
     usageTracker.track(model, usage, latencyMs);
 
     const text = response.content
-      .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+      .filter((block) => block.type === 'text')
       .map((block) => block.text)
       .join('');
 
@@ -252,9 +242,6 @@ export async function generateWithGemini(
           config: {
             ...(options.maxTokens ? { maxOutputTokens: options.maxTokens } : {}),
             temperature: options.temperature ?? 0.7,
-            topP: options.topP,
-            topK: options.topK,
-            stopSequences: options.stopSequences,
           },
         });
       },
@@ -758,7 +745,7 @@ export interface GeneratedImage {
 export async function generateImage(
   prompt: string,
 ): Promise<GeneratedImage> {
-  const model = 'gemini-3.1-flash-image';
+  const model = XAI_IMAGE_MODEL;
 
   await geminiFlashRateLimiter.acquire();
 

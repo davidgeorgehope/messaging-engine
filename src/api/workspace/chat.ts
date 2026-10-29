@@ -73,8 +73,8 @@ app.post('/:id/chat', async (c) => {
 
   return streamSSE(c, async (stream) => {
     try {
-      const { GoogleGenAI } = await import('@google/genai');
-      const client = new GoogleGenAI({ apiKey: config.apiKeys.googleAi });
+      const { getGoogleClient } = await import('../../services/ai/clients.js');
+      const client = getGoogleClient();
       const model = getModelForTask('pro');
 
       let fullText = '';

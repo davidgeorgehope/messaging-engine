@@ -36,6 +36,7 @@ export const config = {
   apiKeys: {
     anthropic: env('ANTHROPIC_API_KEY', ''),
     googleAi: env('GOOGLE_AI_API_KEY', ''),
+    xai: env('XAI_API_KEY', ''),
     github: env('GITHUB_TOKEN', ''),
   },
 
@@ -62,11 +63,11 @@ export const config = {
 
   ai: {
     claude: {
-      model: 'claude-opus-4-6',
+      model: 'grok-4.7',
     },
     gemini: {
-      flashModel: 'gemini-flash-latest',
-      proModel: 'gemini-pro-latest',
+      flashModel: 'grok-4.3',
+      proModel: 'grok-4.7',
       deepResearchAgent: 'deep-research-max-preview-04-2026',
     },
   },
@@ -155,20 +156,20 @@ export type ModelTask = 'flash' | 'pro' | 'deepResearch' | 'generation' | 'scori
 
 const MODEL_PROFILES: Record<ModelProfile, Record<ModelTask, string>> = {
   premium: {
-    flash: 'gemini-flash-latest',
-    pro: 'gemini-pro-latest',
-    deepResearch: 'deep-research-max-preview-04-2026',
-    generation: 'gemini-pro-latest',
-    scoring: 'gemini-flash-latest',
-    deslop: 'gemini-pro-latest',
+    flash: 'grok-4.3',
+    pro: 'grok-4.7',
+    deepResearch: 'grok-4.7',
+    generation: 'grok-4.7',
+    scoring: 'grok-4.3',
+    deslop: 'grok-4.7',
   },
   economy: {
-    flash: 'gemini-flash-lite-latest',
-    pro: 'gemini-flash-latest',
-    deepResearch: 'gemini-flash-latest',
-    generation: 'gemini-flash-latest',
-    scoring: 'gemini-flash-lite-latest',
-    deslop: 'gemini-flash-latest',
+    flash: 'grok-4.3',
+    pro: 'grok-4.3',
+    deepResearch: 'grok-4.3',
+    generation: 'grok-4.3',
+    scoring: 'grok-4.3',
+    deslop: 'grok-4.3',
   },
 };
 
