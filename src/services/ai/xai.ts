@@ -7,6 +7,8 @@ import { config } from '../../config.js';
 
 const XAI_BASE = 'https://api.x.ai/v1';
 export const XAI_IMAGE_MODEL = 'grok-imagine-image-2.0';
+// Generous because web_search responses can take minutes.
+const XAI_TIMEOUT_MS = 5 * 60 * 1000;
 
 function apiKey(): string {
   const key = config.apiKeys.xai;
@@ -19,6 +21,7 @@ async function post(path: string, body: unknown): Promise<any> {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(XAI_TIMEOUT_MS),
   });
   if (!res.ok) {
     const detail = (await res.text()).slice(0, 500);

@@ -145,7 +145,7 @@ export async function generateWithClaude(
         baseDelayMs: 2000,
         retryOn: (error: Error) => {
           const msg = error.message.toLowerCase();
-          return msg.includes('rate') || msg.includes('overloaded') || msg.includes('529');
+          return msg.includes('rate') || msg.includes('overloaded') || msg.includes('529') || msg.includes('503');
         },
       }
     );
