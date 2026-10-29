@@ -66,7 +66,7 @@ export const config = {
       model: 'grok-4.7',
     },
     gemini: {
-      flashModel: 'grok-4.7',
+      flashModel: 'grok-4.7:low',
       proModel: 'grok-4.7',
       deepResearchAgent: 'deep-research-max-preview-04-2026',
     },
@@ -156,20 +156,20 @@ export type ModelTask = 'flash' | 'pro' | 'deepResearch' | 'generation' | 'scori
 
 const MODEL_PROFILES: Record<ModelProfile, Record<ModelTask, string>> = {
   premium: {
-    flash: 'grok-4.7',
+    flash: 'grok-4.7:low',
     pro: 'grok-4.7',
     deepResearch: 'grok-4.7',
     generation: 'grok-4.7',
-    scoring: 'grok-4.7',
+    scoring: 'grok-4.7:low',
     deslop: 'grok-4.7',
   },
   economy: {
-    flash: 'grok-4.7',
-    pro: 'grok-4.7',
-    deepResearch: 'grok-4.7',
-    generation: 'grok-4.7',
-    scoring: 'grok-4.7',
-    deslop: 'grok-4.7',
+    flash: 'grok-4.7:low',
+    pro: 'grok-4.7:low',
+    deepResearch: 'grok-4.7:low',
+    generation: 'grok-4.7:low',
+    scoring: 'grok-4.7:low',
+    deslop: 'grok-4.7:low',
   },
 };
 

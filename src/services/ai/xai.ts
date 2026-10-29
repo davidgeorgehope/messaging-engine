@@ -70,7 +70,10 @@ async function respond(opts: {
   search?: boolean;
   instructions?: string;
 }) {
-  const body: Record<string, unknown> = { model: opts.model, input: opts.input };
+  // `model:effort` (e.g. `grok-4.7:low`) selects reasoning effort; grok-4.7 defaults to high.
+  const [model, effort] = opts.model.split(':');
+  const body: Record<string, unknown> = { model, input: opts.input };
+  if (effort) body.reasoning = { effort };
   if (opts.instructions) body.instructions = opts.instructions;
   if (typeof opts.temperature === 'number') body.temperature = opts.temperature;
   if (opts.maxTokens) body.max_output_tokens = opts.maxTokens;
