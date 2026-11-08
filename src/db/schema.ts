@@ -71,8 +71,8 @@ export const generationJobs = sqliteTable('generation_jobs', {
   errorMessage: text('error_message'),
   errorStack: text('error_stack'),
   retryCount: integer('retry_count').notNull().default(0),
-  geminiInteractionId: text('gemini_interaction_id'),
-  geminiStatus: text('gemini_status'),
+  researchInteractionId: text('research_interaction_id'),
+  researchStatus: text('research_status'),
   startedAt: text('started_at'),
   pipelineSteps: text('pipeline_steps'), // JSON array of step events
   completedAt: text('completed_at'),
@@ -172,7 +172,7 @@ export const competitiveResearch = sqliteTable('competitive_research', {
   rawReport: text('raw_report').notNull(),
   structuredAnalysis: text('structured_analysis').notNull(), // JSON
   groundingSources: text('grounding_sources').notNull(), // JSON
-  geminiInteractionId: text('gemini_interaction_id').notNull(),
+  researchInteractionId: text('research_interaction_id').notNull(),
   status: text('status').notNull().default('pending'),
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
 });

@@ -1,5 +1,5 @@
-// E2E tests for all 5 pipelines using MODEL_PROFILE=economy (Gemini Flash for everything)
-// Run with: npm run test:e2e
+// Live pipeline tests. Opt in with RUN_LIVE_AI_TESTS=1 and XAI_API_KEY.
+// They call only api.x.ai (grok-4.7). Default npm test skips them.
 
 // Set economy profile BEFORE any imports
 process.env.MODEL_PROFILE = 'economy';
@@ -63,7 +63,7 @@ async function createTestJob(pipeline: string, opts: { existingMessaging?: strin
       existingMessaging: opts.existingMessaging,
       voiceProfileIds: [testVoiceId],
       assetTypes: ['battlecard'],  // single asset type for speed
-      model: 'gemini-flash-latest',
+      model: 'grok-4.7',
       pipeline,
     }),
     startedAt: now,
@@ -91,7 +91,7 @@ async function getJobResult(jobId: string) {
   return { job, assets, traceability };
 }
 
-describe('All 5 Pipelines E2E (Flash model profile)', () => {
+describe.skipIf(process.env.RUN_LIVE_AI_TESTS !== '1')('All 5 Pipelines E2E (grok-4.7)', () => {
   beforeAll(async () => {
     // Extract text from One Workflow PDF
     const { PDFParse } = await import('pdf-parse');

@@ -7,7 +7,8 @@ import { generateId } from '../../utils/hash.js';
 import { createLogger } from '../../utils/logger.js';
 import { analyzeSlop, deslop } from '../../services/quality/slop-detector.js';
 import { scoreContent, checkQualityGates, totalQualityScore } from '../quality/score-content.js';
-import { generateWithGemini, generateWithGeminiGroundedSearch, createDeepResearchInteraction, pollInteractionUntilComplete } from '../ai/clients.js';
+import { generateText } from '../ai/clients.js';
+import { createDeepResearchInteraction, pollInteractionUntilComplete } from '../research/deep-research.js';
 import { getModelForTask } from '../../config.js';
 import type { ScoreResults } from '../quality/score-content.js';
 import type { AssetType } from '../../services/generation/types.js';
@@ -374,7 +375,7 @@ export async function runVoiceChangeAction(sessionId: string, assetType: string,
   return withLLMContext({ purpose: 'voice-change', sessionId }, async () => {
   const prompt = `Rewrite the following ${assetType.replace(/_/g, ' ')} content using this voice profile:\n\n## Voice: ${voice.name}\n${voice.voiceGuide}\n\n## Content to Rewrite\n${active.content}\n\nRewrite in the new voice. Output ONLY the rewritten content.`;
 
-  const response = await generateWithGemini(prompt, {
+  const response = await generateText(prompt, {
     model: getModelForTask('pro'),
     temperature: 0.5,
   });
@@ -458,7 +459,7 @@ export async function runAdversarialLoopAction(sessionId: string, assetType: str
     const modeLabel = alreadyPassing ? 'Elevate' : 'Fix';
     const refinementPrompt = `${modeLabel} these quality issues in this ${assetType.replace(/_/g, ' ')}:\n${issues.map(i => `- ${i}`).join('\n')}\n\n## Content\n${content}\n\nOutput ONLY the improved content. Keep the same structure and format.`;
     try {
-      const response = await generateWithGemini(refinementPrompt, {
+      const response = await generateText(refinementPrompt, {
         model: getModelForTask('pro'),
         temperature: 0.4,
       });
@@ -506,26 +507,15 @@ export async function runCompetitiveDeepDiveAction(sessionId: string, assetType:
 
   const researchPrompt = buildCompetitiveResearchPrompt(researchInsights, active.content, assetType);
 
-  // Try deep research first, fall back to grounded search
-  let researchContext: string;
-  try {
-    const interactionId = await createDeepResearchInteraction(researchPrompt);
-    const result = await pollInteractionUntilComplete(interactionId);
-    researchContext = result.text;
-    if (result.sources.length > 0) {
-      researchContext += '\n\nSources:\n' + result.sources.map(s => `- ${s.title}: ${s.url}`).join('\n');
-    }
-  } catch (err) {
-    logger.warn('Deep research failed, falling back to grounded search', { error: String(err) });
-    const groundedResult = await generateWithGeminiGroundedSearch(researchPrompt);
-    researchContext = groundedResult.text;
-    if (groundedResult.sources.length > 0) {
-      researchContext += '\n\nSources:\n' + groundedResult.sources.map(s => `- ${s.title}: ${s.url}`).join('\n');
-    }
+  const interactionId = await createDeepResearchInteraction(researchPrompt);
+  const result = await pollInteractionUntilComplete(interactionId);
+  let researchContext = result.text;
+  if (result.sources.length > 0) {
+    researchContext += '\n\nSources:\n' + result.sources.map(s => `- ${s.title}: ${s.url}`).join('\n');
   }
 
   const enrichmentPrompt = buildCompetitiveEnrichmentPrompt(active.content, researchContext, assetType);
-  const enriched = await generateWithGemini(enrichmentPrompt, {
+  const enriched = await generateText(enrichmentPrompt, {
     model: getModelForTask('pro'),
     temperature: 0.5,
   });
@@ -606,7 +596,7 @@ Rewrite the content to:
 
 Output ONLY the rewritten content.`;
 
-  const rewritten = await generateWithGemini(rewritePrompt, {
+  const rewritten = await generateText(rewritePrompt, {
     model: getModelForTask('pro'),
     temperature: 0.5,
   });

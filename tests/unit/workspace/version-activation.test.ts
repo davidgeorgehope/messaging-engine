@@ -74,14 +74,14 @@ vi.mock('../../../src/services/quality/slop-detector.js', () => ({
 }));
 
 vi.mock('../../../src/services/ai/clients.js', () => ({
-  generateWithGemini: vi.fn(),
-  generateWithGeminiGroundedSearch: vi.fn(),
+  generateText: vi.fn(),
+  generateWithWebSearch: vi.fn(),
   createDeepResearchInteraction: vi.fn(),
   pollInteractionUntilComplete: vi.fn(),
 }));
 
 vi.mock('../../../src/config.js', () => ({
-  config: { ai: { gemini: { proModel: 'gemini-pro-latest' } } },
+  config: { ai: { textModel: 'grok-4.7', imageModel: 'grok-imagine-image-2.0' } },
 }));
 
 vi.mock('../../../src/services/product/insights.js', () => ({

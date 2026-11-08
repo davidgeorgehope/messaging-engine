@@ -1,7 +1,7 @@
 // Shared product insights module — single source of truth for product doc intelligence.
 // All pipelines extract insights once, then use tiered formatters for each context.
 
-import { generateWithGemini } from '../ai/clients.js';
+import { generateText } from '../ai/clients.js';
 import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('product:insights');
@@ -21,8 +21,8 @@ export interface ExtractedInsights {
 }
 
 /**
- * Extract structured product intelligence from raw docs using Gemini Flash.
- * Reads up to 200K chars (well within Gemini Flash 1M token context).
+ * Extract structured product intelligence from raw docs using grok-4.7.
+ * Reads up to 200K chars.
  */
 export async function extractInsights(productDocs: string): Promise<ExtractedInsights | null> {
   try {
@@ -49,7 +49,7 @@ Be specific. Extract actual details, not generic descriptions. If the docs menti
 
 IMPORTANT: Return ONLY valid JSON, no markdown code fences or explanation.`;
 
-    const response = await generateWithGemini(prompt, {
+    const response = await generateText(prompt, {
       temperature: 0.2,
     });
 
@@ -163,7 +163,7 @@ export function formatInsightsForResearch(insights: ExtractedInsights): string {
 
 /**
  * ~2-3K chars. Used for generation prompts (the full picture).
- * All insight fields formatted for Claude/Gemini consumption.
+ * All insight fields formatted for the model prompt.
  */
 export function formatInsightsForPrompt(insights: ExtractedInsights): string {
   const sections: string[] = [];
@@ -244,7 +244,7 @@ export interface DeepPoVInsights extends ExtractedInsights {
 }
 
 /**
- * Deep PoV extraction for Standard pipeline — uses Gemini Pro for deeper analysis.
+ * Deep PoV extraction for Standard pipeline — uses grok-4.7.
  * Extracts thesis, contrarian take, narrative arc, and strongest claims.
  */
 export async function extractDeepPoV(productDocs: string): Promise<DeepPoVInsights | null> {
@@ -282,7 +282,7 @@ Be opinionated in extraction. This is about finding the NARRATIVE, not listing f
 
 IMPORTANT: Return ONLY valid JSON, no markdown code fences.`;
 
-    const response = await generateWithGemini(prompt, {
+    const response = await generateText(prompt, {
       model: getModelForTask('pro'),
       temperature: 0.3,
     });

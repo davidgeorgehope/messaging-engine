@@ -15,7 +15,7 @@ import { createLogger } from '../../utils/logger.js';
 import { runPublicGenerationJob, ASSET_TYPE_LABELS } from '../../api/generate.js';
 import { PUBLIC_GENERATION_PRIORITY_ID } from '../../db/seed.js';
 import { getModelForTask } from '../../config.js';
-import { generateWithGemini } from '../ai/clients.js';
+import { generateText } from '../ai/clients.js';
 import type { ExtractedInsights } from '../product/insights.js';
 import { createInitialVersions } from './versions.js';
 import type { AssetType } from '../generation/types.js';
@@ -500,7 +500,7 @@ async function autoNameSession(sessionId: string, data: CreateSessionInput, pain
 /**
  * Rename a session using extracted product insights.
  * Called by the generation pipeline after extractInsights() completes.
- * Uses the insights summary to generate a concise session name via Gemini Flash.
+ * Uses the insights summary to generate a concise session name via grok-4.7.
  */
 export async function nameSessionFromInsights(jobId: string, insights: ExtractedInsights, assetTypes: AssetType[]) {
   const db = getDatabase();
@@ -532,11 +532,11 @@ export async function nameSessionFromInsights(jobId: string, insights: Extracted
 
     logger.debug('Naming prompt', { jobId, prompt: prompt.substring(0, 200) });
 
-    const result = await generateWithGemini(prompt, {
+    const result = await generateText(prompt, {
       temperature: 0.3,
     });
 
-    logger.debug('Naming Gemini response', { jobId, raw: result.text });
+    logger.debug('Naming response', { jobId, raw: result.text });
 
     const name = result.text.trim().replace(/^["']|["']$/g, '');
     if (name && name.length >= 3 && name.length < 100) {

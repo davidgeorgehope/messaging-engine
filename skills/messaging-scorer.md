@@ -16,7 +16,7 @@ Detects AI writing patterns that make content feel generic and machine-generated
 - Enthusiasm inflation: "exciting", "amazing", "incredible", "game-changer"
 - Clichés: "at the end of the day", "tip of the iceberg", "in a nutshell"
 
-**Scoring method:** Hybrid rule-based pattern detection + Gemini Flash AI analysis.
+**Scoring method:** Hybrid rule-based pattern detection + grok-4.7 analysis.
 - Pattern detection finds specific phrases
 - AI analysis catches subtler patterns (repetitive structure, passive voice overuse)
 - Final score = average of both

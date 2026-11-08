@@ -14,7 +14,8 @@ import { validateGrounding } from '../../services/quality/grounding-validator.js
 import { PUBLIC_GENERATION_PRIORITY_ID } from '../../db/seed.js';
 import type { AssetType } from '../../services/generation/types.js';
 import type { GenerateOptions, AIResponse } from '../../services/ai/types.js';
-import { generateWithClaude, generateWithGemini, generateImage, generateJSON } from '../../services/ai/clients.js';
+import { generateText, generateImage, generateJSON } from '../../services/ai/clients.js';
+import { resolveTextModel } from '../../services/ai/xai.js';
 import { getModelForTask } from '../../config.js';
 import { withLLMContext } from '../../services/ai/call-context.js';
 import { ASSET_TYPE_LABELS, ASSET_TYPE_TEMPERATURE, buildRefinementPrompt } from './prompts.js';
@@ -102,7 +103,7 @@ export function updateJobProgress(jobId: string, fields: Record<string, any>) {
 }
 
 // ---------------------------------------------------------------------------
-// generateContent — AI dispatch. Default: Gemini Pro for all generation.
+// generateContent — all text generation uses xAI grok-4.7.
 // ---------------------------------------------------------------------------
 
 export async function generateContent(
@@ -110,12 +111,9 @@ export async function generateContent(
   options: GenerateOptions,
   model?: string,
 ): Promise<AIResponse> {
-  if (model && model.includes('claude')) {
-    return generateWithClaude(prompt, { ...options, model });
-  }
-  return generateWithGemini(prompt, {
+  return generateText(prompt, {
     ...options,
-    model: getModelForTask('pro'),
+    model: resolveTextModel(model ?? getModelForTask('pro')),
   });
 }
 

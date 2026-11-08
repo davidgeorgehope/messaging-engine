@@ -43,7 +43,7 @@ finalizeJob(jobId, researchAvailable, researchLength)
 
 Community and competitive research shared across pipelines:
 
-- **`runCommunityDeepResearch(insights, prompt)`** — Gemini Deep Research for practitioner quotes and pain points from Reddit, HN, Stack Overflow, GitHub Issues, dev blogs
+- **`runCommunityDeepResearch(insights, prompt)`** — xAI web search for practitioner quotes and pain points from Reddit, HN, Stack Overflow, GitHub Issues, dev blogs
 - **`runCompetitiveResearch(insights, prompt)`** — Deep Research for competitor analysis
 
 **Evidence Levels**:
@@ -129,7 +129,7 @@ The Standard pipeline uses deep PoV extraction and combines community + competit
 
 ### Steps
 
-1. **Deep PoV Extraction** (Gemini Pro)
+1. **Deep PoV Extraction** (grok-4.7)
    - `extractDeepPoV(productDocs)` — comprehensive point-of-view analysis
    - Falls back to `extractInsights()` if PoV extraction fails
    - Names session from insights
@@ -168,7 +168,7 @@ The Outside-In pipeline prioritizes practitioner authenticity. It starts with co
 
 ### Steps
 
-1. **Extract Insights** (Gemini Flash) + name session
+1. **Extract Insights** (grok-4.7) + name session
 
 2. **Banned Words** — Pre-generated per voice
 
@@ -196,7 +196,7 @@ The Adversarial pipeline puts every draft through hostile critique to produce ba
 
 ### Steps
 
-1. **Extract Insights** (Gemini Flash) + name session
+1. **Extract Insights** (grok-4.7) + name session
 
 2. **Banned Words** — Pre-generated per voice
 
@@ -207,7 +207,7 @@ The Adversarial pipeline puts every draft through hostile critique to produce ba
 
 5. **Per Asset Type × Voice**:
    - **Generate initial draft** — Standard generation with research context
-   - **Attack Round 1** (Gemini Pro) — Hostile senior practitioner tears apart the messaging:
+   - **Attack Round 1** (grok-4.7) — Hostile senior practitioner tears apart the messaging:
      - Unsubstantiated claims
      - Vendor-speak detection
      - Vague promises
@@ -233,7 +233,7 @@ The Multi-Perspective pipeline generates from 3 angles and synthesizes the best 
 
 ### Steps
 
-1. **Extract Insights** (Gemini Flash) + name session
+1. **Extract Insights** (grok-4.7) + name session
 
 2. **Banned Words** — Pre-generated per voice
 
@@ -269,7 +269,7 @@ The Straight-Through pipeline scores existing content without generating new con
 
 ### Steps
 
-1. **Extract Insights** (Gemini Flash) + name session
+1. **Extract Insights** (grok-4.7) + name session
 
 2. **Per Asset Type × Voice**:
    - **Score existing content** — Full 5-dimension scoring
@@ -299,16 +299,16 @@ All actions are executed via `runActionInBackground()` which creates an `action_
 
 | Step | Model Task | Premium Model |
 |------|-----------|-----------------|
-| Insight extraction | `flash` | gemini-flash-latest |
-| Deep PoV extraction | `pro` | gemini-pro-latest |
-| Session naming | `flash` | gemini-flash-latest |
-| Banned words generation | `flash` | gemini-flash-latest |
-| Community research | `deepResearch` | deep-research-max-preview-04-2026 |
-| Competitive research | `deepResearch` | deep-research-max-preview-04-2026 |
-| Grounded search | `flash` | gemini-flash-latest |
-| Content generation | `pro` (or selected model) | gemini-pro-latest |
-| Attack prompts | `pro` | gemini-pro-latest |
-| Refinement | selected model | gemini-pro-latest |
-| Scoring | all 5 scorers | gemini-flash-latest |
-| Deslop | `deslop` | gemini-pro-latest |
-| JSON generation | `pro` | gemini-pro-latest |
+| Insight extraction | `flash` | grok-4.7 |
+| Deep PoV extraction | `pro` | grok-4.7 |
+| Session naming | `flash` | grok-4.7 |
+| Banned words generation | `flash` | grok-4.7 |
+| Community research | `deepResearch` | grok-4.7 |
+| Competitive research | `deepResearch` | grok-4.7 |
+| Grounded search | `flash` | grok-4.7 |
+| Content generation | `pro` (or selected model) | grok-4.7 |
+| Attack prompts | `pro` | grok-4.7 |
+| Refinement | selected model | grok-4.7 |
+| Scoring | all 5 scorers | grok-4.7 |
+| Deslop | `deslop` | grok-4.7 |
+| JSON generation | `pro` | grok-4.7 |

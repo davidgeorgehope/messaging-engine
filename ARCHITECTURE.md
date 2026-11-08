@@ -26,7 +26,7 @@ The PMM Messaging Engine is a full-stack application that generates, scores, and
 │  │       │              │              │                   │ │
 │  │  ┌────▼──────────────▼──────────────▼────────────────┐ │ │
 │  │  │                AI Client Layer                     │ │ │
-│  │  │  Gemini Flash │ Gemini Pro │ Deep Research │ Claude│ │ │
+│  │  │  grok-4.7 text │ grok-4.7 search │ grok-imagine-image-2.0 │
 │  │  │  Call Logger │ Call Context (AsyncLocalStorage)    │ │ │
 │  │  └──────────────────────┬────────────────────────────┘ │ │
 │  └─────────────────────────┼──────────────────────────────┘ │
@@ -64,7 +64,7 @@ The pipeline engine is the core generation system. All 5 pipelines share common 
 | Function | Purpose |
 |----------|---------|
 | `loadJobInputs(jobId)` | Load job configuration (product docs, voices, asset types, pipeline) |
-| `generateContent(prompt, options, model?)` | AI dispatch — routes to Gemini or Claude |
+| `generateContent(prompt, options, model?)` | AI dispatch — calls xAI grok-4.7 |
 | `generateAndScore(prompt, system, model, context, thresholds, assetType)` | Generate + score in one call |
 | `refinementLoop(content, context, thresholds, voice, assetType, system, model, maxIter, productName)` | Iterative: deslop → refine → score until gates pass or plateau |
 | `storeVariant(jobId, assetType, voice, content, scores, passesGates, ...)` | Store asset + variant + traceability records |
@@ -89,14 +89,14 @@ PIPELINE_RUNNERS = {
 #### Pipeline Details
 
 **Standard Pipeline**:
-1. Deep PoV extraction (Gemini Pro)
+1. Deep PoV extraction (grok-4.7)
 2. Community deep research (Deep Research agent) + competitive research
 3. PoV-first prompt generation per asset type × voice
 4. Refinement loop (up to 3 iterations)
 5. Store variants with traceability
 
 **Outside-In Pipeline**:
-1. Extract insights (Gemini Flash)
+1. Extract insights (grok-4.7)
 2. Community deep research with **3 full retries** if no evidence
 3. **Fails hard** if no community evidence after retries (no fallback)
 4. Pain-grounded first draft per asset type × voice
@@ -150,7 +150,7 @@ The workspace provides session-based asset management with versioning, chat, and
 
 - `createSession(userId, data)` — Create with pain point, voice(s), asset types, pipeline, product context
 - `startSessionGeneration(sessionId)` — Build generation job, fire pipeline in background
-- Auto-naming: placeholder from input → refined by `nameSessionFromInsights()` via Gemini Flash
+- Auto-naming: placeholder from input → refined by `nameSessionFromInsights()` via grok-4.7
 - Multi-voice: `voiceProfileIds` array in session metadata
 
 #### Versions (`versions.ts`)
@@ -197,7 +197,7 @@ The workspace provides session-based asset management with versioning, chat, and
 
 **Slop Detector** (`slop-detector.ts`):
 - Pattern-based detection: hedging, transitions, fillers, fake enthusiasm, cliches
-- AI-powered analysis via Gemini
+- AI-powered analysis via grok-4.7
 - `deslop()` function rewrites content to remove detected patterns
 
 **Grounding Validator** (`grounding-validator.ts`):
@@ -207,22 +207,21 @@ The workspace provides session-based asset management with versioning, chat, and
 ### 5. AI Client Layer (`src/services/ai/`)
 
 **`clients.ts`** — Unified client layer:
-- `generateWithClaude(prompt, options)` — Claude API with rate limiting + retry
-- `generateWithGemini(prompt, options)` — Gemini with Flash/Pro routing + rate limiting + retry
-- `generateWithGeminiGroundedSearch(prompt, options)` — Gemini with Google Search tool (5x empty retry)
-- `generateJSON<T>(prompt, options)` — Gemini Pro JSON generation with parse retry + error feedback
+- `generateText(prompt, options)` — grok-4.7 with rate limiting and retry
+- `generateWithWebSearch(prompt, options)` — grok-4.7 web search (5x empty retry)
+- `generateJSON<T>(prompt, options)` — grok-4.7 JSON generation with parse retry + error feedback
 - `createDeepResearchInteraction(prompt)` — Async deep research submission
 - `pollInteractionUntilComplete(interactionId)` — Poll with configurable interval/timeout
 
-**Rate limiters**: Claude (10/min), Gemini Flash (60/min), Gemini Pro (15/min)
+**Rate limiter**: xAI (60 requests/min)
 
 **`call-logger.ts`** — Fire-and-forget `logCall()` to `llm_calls` table  
 **`call-context.ts`** — `withLLMContext()` for automatic session/job/purpose threading via AsyncLocalStorage
 
 ### 6. Product Insights (`src/services/product/insights.ts`)
 
-- `extractInsights(productDocs)` — Gemini Flash extraction of domain, category, personas, capabilities, etc.
-- `extractDeepPoV(productDocs)` — Gemini Pro deep point-of-view extraction (used by Standard pipeline)
+- `extractInsights(productDocs)` — grok-4.7 extraction of domain, category, personas, capabilities, etc.
+- `extractDeepPoV(productDocs)` — grok-4.7 deep point-of-view extraction (used by Standard pipeline)
 - `buildFallbackInsights(productDocs)` — Deterministic fallback if extraction fails
 - Formatting functions: `formatInsightsForScoring()`, `formatInsightsForPrompt()`, `formatInsightsForDiscovery()`, `formatInsightsForResearch()`
 
@@ -273,7 +272,7 @@ User creates session (POST /api/workspace/sessions)
 
 - **Framework**: Vitest with 5-minute timeout per test
 - **Pool**: forks (single fork — SQLite isn't thread-safe)
-- **Model profile**: Tests run with `MODEL_PROFILE=economy` (latest lower-cost Gemini aliases)
+- **Model profile**: Tests run with `MODEL_PROFILE=economy` (grok-4.7)
 
 ### Test Categories
 
@@ -291,7 +290,7 @@ User creates session (POST /api/workspace/sessions)
 - `workspace/` — versions, chat-context, naming, multi-voice, version-activation, adversarial-loop, go-outside-integrity, actions-integrity
 
 **Integration** (`tests/integration/`):
-- `naming-gemini.test.ts` — Session naming with real Gemini API
+- `tests/unit/ai/xai-client.test.ts` — mocked xAI request contract
 
 ## Design Decisions & Evolution
 
@@ -317,8 +316,8 @@ Step 6 of the outside-in pipeline ("layer product specifics") was causing the up
 
 The evidence system went through 3 generations:
 1. **Direct API scrapers** (Reddit, HN, SO, GitHub, Discourse) — fragile, rate-limited, keyword-dependent
-2. **Gemini grounded search** — AI-powered but still keyword-based, returned empty results non-deterministically
-3. **Gemini Deep Research** — single call searches all sources natively, eliminates intermediate keyword extraction
+2. **xAI web search** — AI-powered but still keyword-based, returned empty results non-deterministically
+3. **xAI web search** — single call searches all sources natively, eliminates intermediate keyword extraction
 
 The scrapers were deleted (-1,109 lines). Deep Research is now the sole evidence source. Grounded search retries 5x on empty results (the API is flaky — same prompt returns rich results on retry).
 
@@ -328,11 +327,11 @@ All prompts originally had hardcoded vertical and practitioner language baked in
 
 ### Dynamic Banned Words (`7afe971`, `0eef476`)
 
-The banned words system evolved from a static hardcoded list → dynamic per-voice generation via Gemini Flash. The LLM generates 15-20 voice/domain-specific banned words, cached per `voiceId:domain`. The static list is kept as fallback (3x retry with backoff before falling back).
+The banned words system evolved from a static hardcoded list → dynamic per-voice generation via grok-4.7. The LLM generates 15-20 voice/domain-specific banned words, cached per `voiceId:domain`. The static list is kept as fallback (3x retry with backoff before falling back).
 
 ### maxTokens Truncation Bugs (`ac61fec`, `714c021`)
 
-Hardcoded `maxTokens: 50` on session naming caused Gemini to truncate to 0 tokens 40% of the time. More broadly, low hardcoded `maxTokens` values across 8 call sites caused silent truncation with newer models. Fix: **never hardcode maxTokens unless you need more than the default**. Claude still requires explicit `max_tokens` so it uses 16384.
+Hardcoded `maxTokens: 50` on session naming caused empty responses about 40% of the time. Fix: **never hardcode maxTokens unless you need more than the default**.
 
 ### Async Background Jobs (`7399146`)
 
@@ -342,13 +341,13 @@ All 7 workspace actions originally ran synchronously, causing Cloudflare 100s ti
 
 PM2 was originally configured with `tsx watch`, which caused EADDRINUSE crashes when file-watching restarts killed in-flight Deep Research operations. Switched to `node dist/index.js` — more stable for a production process that runs long async operations.
 
-### Chat Switched from Claude to Gemini (`81fd2c9`)
+### Chat uses xAI
 
-Workspace chat originally used Claude for streaming responses. This was switched to Gemini Pro to keep the entire system on a single AI provider by default. Claude remains available as an opt-in override for generation.
+Workspace chat streams from grok-4.7. Text generation has one provider.
 
 ### Model Profile System (`87981d0`, `34aaa9b`)
 
-Created to prevent accidental premium-model spend during testing. `MODEL_PROFILE=economy` swaps expensive tasks to lower-cost latest Gemini aliases. A guard test (`model-profile-guard.test.ts`) fails if tests run against premium models. The config defaults to the economy profile.
+`MODEL_PROFILE=economy` is the default. Both profiles use grok-4.7. `model-profile-guard.test.ts` still requires the economy profile during tests.
 
 ### Split Research Pipeline Removed (`a622121`)
 
@@ -364,7 +363,7 @@ Every pipeline was independently truncating raw product docs (often just the exe
 
 ### LLM-Based Spirit Validation (`9bd9618`)
 
-E2E tests don't just check that pipelines complete — they use Gemini to score whether the output matches the pipeline's *intent*:
+Opt-in live tests can ask grok-4.7 whether the output matches the pipeline's intent:
 - Outside-in: must be practitioner-driven, low product doc influence
 - Standard: must have strong product PoV and thesis
 - Adversarial: must feel battle-tested, acknowledge weaknesses

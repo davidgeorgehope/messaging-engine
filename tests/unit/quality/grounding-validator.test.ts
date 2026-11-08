@@ -5,7 +5,7 @@ vi.mock('../../../src/services/ai/clients.js', () => ({
 }));
 
 vi.mock('../../../src/config.js', () => ({
-  getModelForTask: vi.fn().mockReturnValue('gemini-flash-lite-latest'),
+  getModelForTask: vi.fn().mockReturnValue('grok-4.7'),
 }));
 
 vi.mock('../../../src/utils/logger.js', () => ({
@@ -51,7 +51,7 @@ describe('grounding-validator', () => {
           cleanedContent: 'Clean content without fabrications',
         },
         usage: { inputTokens: 500, outputTokens: 300 },
-        model: 'gemini-flash-lite-latest',
+        model: 'grok-4.7',
       } as any);
 
       const result = await validateGrounding('Content with fake quotes from r/productmanagement', 'product-only');
@@ -74,7 +74,7 @@ describe('grounding-validator', () => {
           cleanedContent: 'Original content unchanged',
         },
         usage: { inputTokens: 500, outputTokens: 300 },
-        model: 'gemini-flash-lite-latest',
+        model: 'grok-4.7',
       } as any);
 
       const result = await validateGrounding('Clean product-only content', 'product-only');

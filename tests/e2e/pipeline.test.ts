@@ -1,6 +1,5 @@
-// End-to-end pipeline test
-// Runs real API calls: PDF extraction → competitive research → generation (8 types) → quality scoring
-// Requires ANTHROPIC_API_KEY and GOOGLE_AI_API_KEY in environment
+// Live pipeline test. Opt in with RUN_LIVE_AI_TESTS=1 and XAI_API_KEY.
+// Calls only api.x.ai. Default npm test skips this file.
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'fs';
@@ -8,7 +7,7 @@ import { join } from 'path';
 import { PDFParse } from 'pdf-parse';
 
 // AI clients
-import { generateWithGemini } from '../../src/services/ai/clients.js';
+import { generateText } from '../../src/services/ai/clients.js';
 import { createDeepResearchInteraction, pollInteractionUntilComplete } from '../../src/services/research/deep-research.js';
 
 // Quality scoring
@@ -108,7 +107,7 @@ Generate the messaging now. Output ONLY the messaging content, no meta-commentar
 // Tests — sequential phases
 // ---------------------------------------------------------------------------
 
-describe('E2E Pipeline', () => {
+describe.skipIf(process.env.RUN_LIVE_AI_TESTS !== '1')('E2E Pipeline', () => {
   beforeAll(async () => {
     // Initialize database for persona critics
     await initializeDatabase();
@@ -179,7 +178,7 @@ Be specific and factual, cite sources. Include practitioner quotes from forums.`
         const systemPrompt = buildSystemPrompt(assetType);
         const userPrompt = buildUserPrompt(assetType);
 
-        const response = await generateWithGemini(userPrompt, {
+        const response = await generateText(userPrompt, {
           systemPrompt,
           temperature: 0.7,
         });

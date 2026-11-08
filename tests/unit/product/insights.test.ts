@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mockGenerateWithGemini = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/services/ai/clients.js', () => ({
-  generateWithGemini: mockGenerateWithGemini,
+  generateText: mockGenerateWithGemini,
 }));
 
 vi.mock('../../../src/utils/logger.js', () => ({

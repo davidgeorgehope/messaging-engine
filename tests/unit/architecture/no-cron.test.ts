@@ -69,7 +69,7 @@ describe('no-cron architectural constraint', () => {
     for (const fullPath of allTsFiles) {
       const source = readFileSync(fullPath, 'utf-8');
       const relativePath = fullPath.replace(ROOT + '/', '');
-      // Allow pollInteractionUntilComplete (legitimate Gemini Deep Research polling)
+      // Research no longer polls. setInterval remains disallowed outside the rate limiter.
       if (/\bsetInterval\s*\(/.test(source) && !/pollInteractionUntilComplete/.test(source) && !/rate-limit/.test(relativePath)) {
         expect.fail(`${relativePath} uses setInterval for recurring jobs`);
       }
