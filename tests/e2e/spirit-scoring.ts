@@ -1,6 +1,6 @@
 // Pipeline spirit validation — LLM-based scoring of whether output matches pipeline intent
 
-import { generateWithGemini } from '../../src/services/ai/clients.js';
+import { generateText } from '../../src/services/ai/clients.js';
 
 interface SpiritScore {
   pipeline: string;
@@ -51,7 +51,7 @@ Also provide a brief "reasoning" explaining your scores.
 Return ONLY valid JSON:
 {"fidelity_score": N, "practitioner_voice": N, "product_doc_influence": N, "reasoning": "..."}`;
 
-  const response = await generateWithGemini(prompt, { temperature: 0.2 });
+  const response = await generateText(prompt, { temperature: 0.2 });
   let jsonText = response.text.trim();
   if (jsonText.startsWith('```')) {
     jsonText = jsonText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');

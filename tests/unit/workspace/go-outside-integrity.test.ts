@@ -67,7 +67,7 @@ describe('evidence grounding in pipeline modules', () => {
   it('evidence.ts uses Deep Research for community discovery (not grounded search)', () => {
     const source = readFileSync(evidencePath, 'utf-8');
     expect(source).toContain('createDeepResearchInteraction');
-    expect(source).not.toContain('generateWithGeminiGroundedSearch');
+    expect(source).not.toContain('generateWithWebSearch');
     expect(source).not.toContain('extractKeywordsAndSources');
   });
 
@@ -99,10 +99,12 @@ describe('evidence grounding in pipeline modules', () => {
     expect(source).toContain("throw new Error");
   });
 
-  it('default generation model is Gemini (not Claude)', () => {
+  it('default generation model is xAI grok-4.7', () => {
     const source = readFileSync(orchestratorPath, 'utf-8');
-    expect(source).toMatch(/Default.*Gemini/i);
-    expect(source).toContain("model.includes('claude')");
+    expect(source).toContain('resolveTextModel');
+    expect(source).toContain('generateText');
+    expect(source).not.toContain("model.includes('claude')");
+    expect(source).not.toContain('generateWithClaude');
   });
 
   it('competitive research uses extracted insights, not naive truncation', () => {

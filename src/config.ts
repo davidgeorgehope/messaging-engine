@@ -34,8 +34,6 @@ export const config = {
   },
 
   apiKeys: {
-    anthropic: env('ANTHROPIC_API_KEY', ''),
-    googleAi: env('GOOGLE_AI_API_KEY', ''),
     xai: env('XAI_API_KEY', ''),
     github: env('GITHUB_TOKEN', ''),
   },
@@ -62,14 +60,8 @@ export const config = {
   },
 
   ai: {
-    claude: {
-      model: 'grok-4.7',
-    },
-    gemini: {
-      flashModel: 'grok-4.7',
-      proModel: 'grok-4.7',
-      deepResearchAgent: 'deep-research-max-preview-04-2026',
-    },
+    textModel: 'grok-4.7',
+    imageModel: 'grok-imagine-image-2.0',
   },
 
   discovery: {
@@ -84,22 +76,14 @@ export const config = {
     maxDeslopAttempts: envInt('MAX_DESLOP_ATTEMPTS', 1),
   },
 
-  deepResearch: {
-    pollIntervalMs: envInt('DEEP_RESEARCH_POLL_INTERVAL_MS', 30000),
-    timeoutMs: envInt('DEEP_RESEARCH_TIMEOUT_MS', 3600000),
-  },
 } as const;
 
 export function validateConfig(): void {
   const warnings: string[] = [];
   const errors: string[] = [];
 
-  // Check for default/missing API keys
-  if (!config.apiKeys.anthropic) {
-    warnings.push('ANTHROPIC_API_KEY is not set — Claude AI calls will fail');
-  }
-  if (!config.apiKeys.googleAi) {
-    warnings.push('GOOGLE_AI_API_KEY is not set — Gemini AI calls will fail');
+  if (!config.apiKeys.xai) {
+    warnings.push('XAI_API_KEY is not set — model calls will fail');
   }
   if (!config.apiKeys.github) {
     warnings.push('GITHUB_TOKEN is not set — GitHub discovery will fail');
@@ -127,11 +111,8 @@ export function validateConfig(): void {
     if (config.admin.jwtSecret.includes('dev-secret')) {
       errors.push('JWT_SECRET must be changed in production');
     }
-    if (!config.apiKeys.anthropic) {
-      errors.push('ANTHROPIC_API_KEY is required in production');
-    }
-    if (!config.apiKeys.googleAi) {
-      errors.push('GOOGLE_AI_API_KEY is required in production');
+    if (!config.apiKeys.xai) {
+      errors.push('XAI_API_KEY is required in production');
     }
   }
 
@@ -147,29 +128,32 @@ export function validateConfig(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Model Profile System — swap all models to Flash for cheap testing
+// Model profile names remain so existing sessions still record economy/premium.
+// Both profiles use grok-4.7. There is no second provider to switch to.
 // ---------------------------------------------------------------------------
 
 export type ModelProfile = 'economy' | 'premium';
 
 export type ModelTask = 'flash' | 'pro' | 'deepResearch' | 'generation' | 'scoring' | 'deslop';
 
+const XAI_TEXT_MODEL = 'grok-4.7';
+
 const MODEL_PROFILES: Record<ModelProfile, Record<ModelTask, string>> = {
   premium: {
-    flash: 'grok-4.7',
-    pro: 'grok-4.7',
-    deepResearch: 'grok-4.7',
-    generation: 'grok-4.7',
-    scoring: 'grok-4.7',
-    deslop: 'grok-4.7',
+    flash: XAI_TEXT_MODEL,
+    pro: XAI_TEXT_MODEL,
+    deepResearch: XAI_TEXT_MODEL,
+    generation: XAI_TEXT_MODEL,
+    scoring: XAI_TEXT_MODEL,
+    deslop: XAI_TEXT_MODEL,
   },
   economy: {
-    flash: 'grok-4.7',
-    pro: 'grok-4.7',
-    deepResearch: 'grok-4.7',
-    generation: 'grok-4.7',
-    scoring: 'grok-4.7',
-    deslop: 'grok-4.7',
+    flash: XAI_TEXT_MODEL,
+    pro: XAI_TEXT_MODEL,
+    deepResearch: XAI_TEXT_MODEL,
+    generation: XAI_TEXT_MODEL,
+    scoring: XAI_TEXT_MODEL,
+    deslop: XAI_TEXT_MODEL,
   },
 };
 

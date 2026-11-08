@@ -4,7 +4,7 @@ import { parseScoringThresholds } from '../../../types/index.js';
 
 import { createLogger } from '../../../utils/logger.js';
 import { getModelForTask } from '../../../config.js';
-import { generateWithGemini } from '../../../services/ai/clients.js';
+import { generateText } from '../../../services/ai/clients.js';
 import { extractInsights, buildFallbackInsights, formatInsightsForScoring, formatInsightsForPrompt } from '../../../services/product/insights.js';
 import { nameSessionFromInsights } from '../../../services/workspace/sessions.js';
 import { loadTemplate, buildSystemPrompt, buildUserPrompt, getBannedWordsForVoice, ASSET_TYPE_LABELS, ASSET_TYPE_TEMPERATURE } from '../prompts.js';
@@ -101,7 +101,7 @@ ${currentContent}
 
 Be brutal. Every weakness you find makes the final output stronger. Format as a numbered list of specific attacks.`;
 
-          const attackResponse = await generateWithGemini(attackPrompt, {
+          const attackResponse = await generateText(attackPrompt, {
             model: getModelForTask('pro'),
             temperature: 0.6,
           });

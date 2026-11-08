@@ -59,7 +59,7 @@ vi.mock('../../../src/utils/logger.js', () => ({
 }));
 
 vi.mock('../../../src/services/ai/clients.js', () => ({
-  generateWithGemini: vi.fn().mockResolvedValue({ text: 'Test Session Name' }),
+  generateText: vi.fn().mockResolvedValue({ text: 'Test Session Name' }),
 }));
 
 vi.mock('../../../src/api/generate.js', () => ({

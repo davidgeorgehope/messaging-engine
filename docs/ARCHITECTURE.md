@@ -11,7 +11,7 @@ The PMM Messaging Engine converts product documentation into scored, quality-tes
 | Backend | Hono (REST API), TypeScript |
 | Frontend | Vite + React + Tailwind CSS |
 | Database | SQLite + Drizzle ORM |
-| AI Models | Gemini latest aliases (premium), Gemini Flash/Flash-Lite latest aliases (economy) |
+| AI Models | grok-4.7 (premium), grok-4.7/Flash-Lite latest aliases (economy) |
 
 ## File Structure
 
@@ -48,10 +48,10 @@ src/
 │   │   ├── persona-critic.ts    # Persona fit scorer
 │   │   └── grounding-validator.ts # Strips fabricated quotes
 │   ├── ai/
-│   │   ├── clients.ts           # Gemini + Claude API wrappers
+│   │   ├── clients.ts           # xAI client
 │   │   └── types.ts             # GenerateOptions, AIResponse
 │   ├── product/insights.ts      # Insight extraction + deep PoV
-│   ├── research/deep-research.ts # Gemini Deep Research agent
+│   ├── research/deep-research.ts # xAI web search agent
 │   └── workspace/               # Sessions, chat, actions, versions
 ├── db/
 │   ├── schema.ts                # Drizzle schema (14 tables)
@@ -75,12 +75,12 @@ Two profiles controlled by `MODEL_PROFILE` env var:
 
 | Task | Premium | Economy |
 |------|-----------|------|
-| flash | gemini-flash-latest | gemini-flash-lite-latest |
-| pro | gemini-pro-latest | gemini-flash-latest |
-| deepResearch | deep-research-max-preview-04-2026 | gemini-flash-latest |
-| generation | gemini-pro-latest | gemini-flash-latest |
-| scoring | gemini-flash-latest | gemini-flash-lite-latest |
-| deslop | gemini-pro-latest | gemini-flash-latest |
+| flash | grok-4.7 | grok-4.7 |
+| pro | grok-4.7 | grok-4.7 |
+| deepResearch | grok-4.7 | grok-4.7 |
+| generation | grok-4.7 | grok-4.7 |
+| scoring | grok-4.7 | grok-4.7 |
+| deslop | grok-4.7 | grok-4.7 |
 
 Test profile uses a single cheap model for all tasks — ideal for development and CI.
 

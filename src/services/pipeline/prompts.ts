@@ -7,7 +7,7 @@ import { join } from 'path';
 import type { AssetType } from '../../services/generation/types.js';
 import type { ExtractedInsights, DeepPoVInsights } from '../../services/product/insights.js';
 import { formatInsightsForPrompt, formatInsightsForResearch } from '../../services/product/insights.js';
-import { generateWithGemini } from '../../services/ai/clients.js';
+import { generateText } from '../../services/ai/clients.js';
 import { getModelForTask } from '../../config.js';
 import { createLogger } from '../../utils/logger.js';
 import type { ScoreResults } from '../../services/quality/score-content.js';
@@ -101,7 +101,7 @@ Return ONLY a JSON array like: ["phrase1", "phrase2", ...]`;
   const MAX_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const response = await generateWithGemini(prompt, { model: getModelForTask('flash'), temperature: 0.2 });
+      const response = await generateText(prompt, { model: getModelForTask('flash'), temperature: 0.2 });
       const cleaned = response.text.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleaned);
       if (Array.isArray(parsed) && parsed.length > 0) {

@@ -12,7 +12,7 @@ import { join } from 'path';
 
 const ONE_WORKFLOW_PDF = join(process.cwd(), 'data', 'uploads', 'mllhgsii-d39o46w3_One_Workflow__1_.pdf');
 
-describe('Community Evidence Search', () => {
+describe.skipIf(process.env.RUN_LIVE_AI_TESTS !== '1')('Community Evidence Search', () => {
   let pdfText: string;
   let insights: ExtractedInsights;
 

@@ -106,8 +106,8 @@ Tracks generation pipeline execution.
 | `error_message` | TEXT | nullable | Error description |
 | `error_stack` | TEXT | nullable | Error stack trace |
 | `retry_count` | INTEGER | NOT NULL, default 0 | Retry attempts |
-| `gemini_interaction_id` | TEXT | nullable | Deep Research interaction ID |
-| `gemini_status` | TEXT | nullable | Deep Research status |
+| `research_interaction_id` | TEXT | nullable | xAI web-search research id |
+| `research_status` | TEXT | nullable | Research status |
 | `started_at` | TEXT | nullable | Start timestamp |
 | `pipeline_steps` | TEXT | nullable | JSON array of pipeline step events |
 | `completed_at` | TEXT | nullable | Completion timestamp |
@@ -202,7 +202,7 @@ Individual scores from each critic for each asset.
 
 ## Table 10: `competitive_research`
 
-Stored results from Gemini Deep Research competitive analysis.
+Stored results from xAI web search competitive analysis.
 
 | Column | Type | Constraints | Description |
 |--------|------|------------|-------------|
@@ -212,7 +212,7 @@ Stored results from Gemini Deep Research competitive analysis.
 | `raw_report` | TEXT | NOT NULL | Full research report |
 | `structured_analysis` | TEXT | NOT NULL | JSON structured analysis |
 | `grounding_sources` | TEXT | NOT NULL | JSON source URLs |
-| `gemini_interaction_id` | TEXT | NOT NULL | Deep Research ID |
+| `research_interaction_id` | TEXT | NOT NULL | xAI web-search research id |
 | `status` | TEXT | NOT NULL, default 'pending' | Research status |
 | `created_at` | TEXT | NOT NULL | ISO 8601 |
 

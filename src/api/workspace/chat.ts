@@ -7,7 +7,7 @@ import { generateId } from '../../utils/hash.js';
 import { createLogger } from '../../utils/logger.js';
 import { assembleChatContext } from '../../services/workspace/chat-context.js';
 import { scoreContent, checkQualityGates, DEFAULT_THRESHOLDS } from '../../services/quality/score-content.js';
-import { config, getModelForTask } from '../../config.js';
+import { getModelForTask } from '../../config.js';
 import { desc } from 'drizzle-orm';
 
 const logger = createLogger('api:workspace:chat');
@@ -60,38 +60,26 @@ app.post('/:id/chat', async (c) => {
   // Assemble context
   const context = await assembleChatContext(sessionId, assetType);
 
-  // Build conversation history for Gemini (system prompt goes in first user turn)
   const chatHistory = context.messages.map(m => ({
-    role: m.role === 'assistant' ? 'model' as const : 'user' as const,
-    parts: [{ text: m.content }],
+    role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
+    content: m.content,
   }));
 
-  // Combine system prompt with user message
   const userPrompt = context.systemPrompt
     ? `${context.systemPrompt}\n\n${message}`
     : message;
 
   return streamSSE(c, async (stream) => {
     try {
-      const { getGoogleClient } = await import('../../services/ai/clients.js');
-      const client = getGoogleClient();
+      const { streamText } = await import('../../services/ai/clients.js');
       const model = getModelForTask('pro');
 
       let fullText = '';
 
-      const response = await client.models.generateContentStream({
-        model,
-        contents: [
-          ...chatHistory,
-          { role: 'user', parts: [{ text: userPrompt }] },
-        ],
-        config: {
-          temperature: 0.7,
-        },
-      });
-
-      for await (const chunk of response) {
-        const text = chunk.text ?? '';
+      for await (const text of streamText(
+        [...chatHistory, { role: 'user', content: userPrompt }],
+        { model, temperature: 0.7 },
+      )) {
         if (text) {
           fullText += text;
           await stream.writeSSE({

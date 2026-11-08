@@ -1,141 +1,37 @@
-import { config, getModelForTask } from '../../config.js';
-import { generateWithGeminiGroundedSearch, getGoogleClient } from '../ai/clients.js';
+/**
+ * Community and competitive research via xAI web search on grok-4.7.
+ * Research is one grok-4.7 web_search call, returned through the existing interaction id.
+ */
+import { generateWithWebSearch } from '../ai/clients.js';
 import { createLogger } from '../../utils/logger.js';
 import type { SearchResult } from '../ai/types.js';
 
-const logger = createLogger('research:deep-research');
+const logger = createLogger('research:web-search');
 
-const POLL_INTERVAL_MS = config.deepResearch.pollIntervalMs;
-const MAX_DURATION_MS = config.deepResearch.timeoutMs;
-
-function getClient() {
-  return getGoogleClient();
-}
+const results = new Map<string, { text: string; sources: SearchResult[] }>();
 
 export async function createDeepResearchInteraction(prompt: string): Promise<string> {
-  // Check model capability: only deep-research-* models support the agent API
-  const deepResearchModel = getModelForTask('deepResearch');
-  if (!deepResearchModel.startsWith('deep-research')) {
-    logger.info('Model does not support Deep Research agent API, using grounded search fallback', { model: deepResearchModel });
-    const result = await generateWithGeminiGroundedSearch(prompt);
-    const syntheticId = `dr-fallback-${Date.now().toString(36)}`;
-    _fallbackResults.set(syntheticId, { text: result.text, sources: result.sources });
-    return syntheticId;
-  }
-
-  const client = getClient();
-  logger.info('Creating Deep Research interaction');
-
-  const interaction = await (client as any).interactions.create({
-    input: prompt,
-    agent: deepResearchModel,
-    background: true,
-    store: true,
-  });
-
-  logger.info('Deep Research interaction created', { id: interaction.id });
-  return interaction.id;
+  logger.info('Running xAI web research', { promptLength: prompt.length });
+  const result = await generateWithWebSearch(prompt);
+  const id = `xai-search-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  results.set(id, { text: result.text, sources: result.sources });
+  return id;
 }
-
-// Cache for grounded search fallback results (when model doesn't support Deep Research agent)
-const _fallbackResults = new Map<string, { text: string; sources: SearchResult[] }>();
 
 export async function pollInteractionUntilComplete(
   interactionId: string,
   onProgress?: (status: string) => void,
 ): Promise<{ text: string; sources: SearchResult[] }> {
-  // Return cached fallback result immediately
-  if (_fallbackResults.has(interactionId)) {
-    const cached = _fallbackResults.get(interactionId)!;
-    _fallbackResults.delete(interactionId);
-    onProgress?.('completed');
-    return cached;
+  const cached = results.get(interactionId);
+  if (!cached) {
+    throw new Error(`Unknown research interaction: ${interactionId}`);
   }
-
-  const client = getClient();
-  const startTime = Date.now();
-
-  logger.info('Polling Deep Research interaction', { interactionId });
-
-  while (true) {
-    const elapsed = Date.now() - startTime;
-    if (elapsed > MAX_DURATION_MS) {
-      throw new Error(`Deep Research timed out after ${MAX_DURATION_MS / 1000}s`);
-    }
-
-    const interaction = await (client as any).interactions.get(interactionId);
-    const status = interaction.status;
-
-    logger.debug('Poll status', { interactionId, status, elapsed: `${Math.round(elapsed / 1000)}s` });
-    onProgress?.(status);
-
-    if (status === 'completed') {
-      const text = extractTextFromOutputs(interaction.outputs);
-      const sources = extractSourcesFromResponse(interaction, text);
-      logger.info('Deep Research completed', { textLength: text.length, sourceCount: sources.length });
-      return { text, sources };
-    }
-
-    if (status === 'failed') {
-      throw new Error(`Deep Research failed: ${interaction.error || 'Unknown error'}`);
-    }
-
-    await sleep(POLL_INTERVAL_MS);
-  }
-}
-
-function extractTextFromOutputs(outputs: Array<string | { text?: string; content?: string | unknown }>): string {
-  if (!outputs || outputs.length === 0) return '';
-
-  return outputs
-    .map((output) => {
-      if (typeof output === 'string') return output;
-      if (output.text) return output.text;
-      if (output.content) return typeof output.content === 'string' ? output.content : JSON.stringify(output.content);
-      return '';
-    })
-    .filter(Boolean)
-    .join('\n\n');
-}
-
-function extractSourcesFromResponse(interaction: Record<string, any>, text: string): SearchResult[] {
-  const sources: SearchResult[] = [];
-  const seenUrls = new Set<string>();
-
-  // Extract from markdown links in text
-  const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
-  let match;
-  while ((match = linkRegex.exec(text)) !== null) {
-    const [, title, url] = match;
-    if (url.startsWith('http') && !seenUrls.has(url)) {
-      seenUrls.add(url);
-      sources.push({ title, url, snippet: '' });
-    }
-  }
-
-  // Extract from grounding metadata
-  const groundingPaths = [
-    interaction?.groundingMetadata?.groundingChunks,
-    interaction?.candidates?.[0]?.groundingMetadata?.groundingChunks,
-  ];
-
-  for (const chunks of groundingPaths) {
-    if (!chunks) continue;
-    for (const chunk of chunks) {
-      if (chunk?.web?.uri && !seenUrls.has(chunk.web.uri)) {
-        seenUrls.add(chunk.web.uri);
-        sources.push({
-          title: chunk.web.title || '',
-          url: chunk.web.uri,
-          snippet: '',
-        });
-      }
-    }
-  }
-
-  return sources;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  results.delete(interactionId);
+  onProgress?.('completed');
+  logger.info('xAI web research ready', {
+    interactionId,
+    textLength: cached.text.length,
+    sourceCount: cached.sources.length,
+  });
+  return cached;
 }

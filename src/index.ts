@@ -3,12 +3,13 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { createApi } from './api/index.js';
 import { initializeDatabase } from './db/index.js';
-import { config } from './config.js';
+import { config, validateConfig } from './config.js';
 import { createLogger } from './utils/logger.js';
 
 const logger = createLogger('server');
 
 async function main() {
+  validateConfig();
   logger.info('Starting Messaging Engine');
 
   // Initialize database (seeds voice profiles if needed)

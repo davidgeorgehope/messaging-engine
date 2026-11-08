@@ -249,7 +249,7 @@ export default function NewSession() {
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Model Profile</h2>
               <p className="text-sm text-gray-500 mt-0.5">
-                {modelProfile === 'premium' ? 'Pro models — higher quality, slower, more expensive' : 'Flash models — faster, cheaper, good for iteration'}
+                Grok 4.7 for generation, scoring, and web research
               </p>
             </div>
             <div className="flex items-center bg-gray-100 rounded-lg p-1">
@@ -273,7 +273,7 @@ export default function NewSession() {
                   💎 Expensive
                 </button>
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                  Disabled to reduce costs — Flash models are default
+                  Disabled — generation stays on Grok 4.7
                 </div>
               </div>
             </div>

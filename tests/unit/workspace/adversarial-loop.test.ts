@@ -78,15 +78,15 @@ vi.mock('../../../src/services/quality/slop-detector.js', () => ({
 }));
 
 vi.mock('../../../src/services/ai/clients.js', () => ({
-  generateWithGemini: mockGenerateWithGemini,
-  generateWithGeminiGroundedSearch: vi.fn(),
+  generateText: mockGenerateWithGemini,
+  generateWithWebSearch: vi.fn(),
   createDeepResearchInteraction: vi.fn(),
   pollInteractionUntilComplete: vi.fn(),
 }));
 
 vi.mock('../../../src/config.js', () => ({
-  getModelForTask: () => 'gemini-pro-latest',
-  config: { ai: { gemini: { proModel: 'gemini-pro-latest' } } },
+  getModelForTask: () => 'grok-4.7',
+  config: { ai: { textModel: 'grok-4.7', imageModel: 'grok-imagine-image-2.0' } },
 }));
 
 vi.mock('../../../src/services/product/insights.js', () => ({
@@ -188,7 +188,7 @@ describe('runAdversarialLoopAction', () => {
     mockCheckQualityGates.mockReturnValue(true);
     // Elevation generates, but totalQualityScore stays the same → stops
     mockTotalQualityScore.mockReturnValue(30);
-    // generateWithGemini returns same content as original
+    // generateText returns same content as original
     mockGenerateWithGemini.mockResolvedValue({ text: 'original content', usage: { totalTokens: 50 } });
 
     const result = await runAdversarialLoopAction('s1', 'battlecard');
@@ -233,7 +233,7 @@ describe('runAdversarialLoopAction', () => {
     expect(mockScoreContent).toHaveBeenCalledTimes(4);
   });
 
-  it('breaks on generateWithGemini error', async () => {
+  it('breaks on generateText error', async () => {
     setupActiveVersion();
     mockScoreContent.mockResolvedValue(failingScores);
     mockCheckQualityGates.mockReturnValue(false);

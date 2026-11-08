@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This is the **PMM Messaging Engine**, an automated system that converts practitioner pain points and product documentation into scored, traceable messaging assets. It uses AI-powered generation (Gemini by default) with a voice profile system, community evidence grounding, and a workspace UI for iterative refinement.
+This is the **PMM Messaging Engine**, an automated system that converts practitioner pain points and product documentation into scored, traceable messaging assets. It uses xAI grok-4.7 with a voice profile system, community evidence grounding, and a workspace UI for iterative refinement.
 
 **Core value proposition**: Every messaging asset is grounded in real community evidence, enriched with competitive intelligence, generated in a controlled voice, stress-tested for quality, and fully traceable back to its source.
 
@@ -12,7 +12,7 @@ This is the **PMM Messaging Engine**, an automated system that converts practiti
 - **Backend**: Hono (lightweight web framework)
 - **Database**: SQLite via better-sqlite3 + Drizzle ORM
 - **Admin UI**: Vite + React + React Router + Tailwind CSS (in `admin/`)
-- **AI Models**: Gemini Flash (scoring, classification), Gemini Pro (generation, deslop), Gemini Deep Research (community/competitive research), Claude (optional override)
+- **AI Models**: xAI grok-4.7 for text, scoring, and web research; grok-imagine-image-2.0 for images
 - **Auth**: JWT via jose (jsonwebtoken replacement), bcryptjs for passwords
 - **IDs**: nanoid (21-character string IDs)
 - **Process Manager**: PM2 via `ecosystem.config.cjs`
@@ -22,7 +22,7 @@ This is the **PMM Messaging Engine**, an automated system that converts practiti
 
 1. **SQLite over PostgreSQL**: Single-file database for simplicity. This is an internal PMM tool, not a high-concurrency service.
 
-2. **Model Profile System**: `MODEL_PROFILE` env var switches all models between premium (Gemini 3) and economy (all Gemini 2.5 Flash). See `getModelForTask()` in `config.ts`.
+2. **Model Profile System**: `MODEL_PROFILE` still records `economy` or `premium`, and both profiles use grok-4.7. See `getModelForTask()` in `config.ts`.
 
 3. **JSON in TEXT columns**: Complex nested data stored as JSON-serialized TEXT in SQLite. Always `JSON.parse()` on read, `JSON.stringify()` on write.
 
@@ -52,7 +52,7 @@ This is the **PMM Messaging Engine**, an automated system that converts practiti
 7. `messaging_assets` — Generated messaging assets (primary output)
 8. `persona_critics` — AI critic personas for quality scoring
 9. `persona_scores` — Individual scores per (asset, critic)
-10. `competitive_research` — Gemini Deep Research results
+10. `competitive_research` — xAI web research results
 11. `asset_traceability` — Full evidence chain for each asset
 12. `messaging_gaps` — Identified messaging coverage gaps
 13. `voice_profiles` — Voice/tone profiles for generation and scoring
@@ -72,20 +72,20 @@ Controlled by `MODEL_PROFILE` env var (`'economy'` | `'premium'`).
 
 | Task | Premium Model | Economy Model |
 |------|--------------|---------------|
-| flash | gemini-flash-latest | gemini-flash-lite-latest |
-| pro | gemini-pro-latest | gemini-flash-latest |
-| deepResearch | deep-research-max-preview-04-2026 | gemini-flash-latest |
-| generation | gemini-pro-latest | gemini-flash-latest |
-| scoring | gemini-flash-latest | gemini-flash-lite-latest |
-| deslop | gemini-pro-latest | gemini-flash-latest |
+| flash | grok-4.7 | grok-4.7 |
+| pro | grok-4.7 | grok-4.7 |
+| deepResearch | grok-4.7 | grok-4.7 |
+| generation | grok-4.7 | grok-4.7 |
+| scoring | grok-4.7 | grok-4.7 |
+| deslop | grok-4.7 | grok-4.7 |
 
-Use `getModelForTask(task)` from `config.ts` — never hardcode model names. Claude (`claude-opus-4-6`) is opt-in override only when user explicitly selects it.
+Use `getModelForTask(task)` from `config.ts`. Every task resolves to grok-4.7. Image generation uses grok-imagine-image-2.0. Do not add Anthropic, Gemini, or OpenAI calls.
 
 ## LLM Call Logging
 
 - **`src/services/ai/call-logger.ts`** — `logCall()` persists every LLM call to the `llm_calls` table. Fire-and-forget, never throws.
 - **`src/services/ai/call-context.ts`** — `withLLMContext({purpose, jobId, sessionId}, fn)` uses AsyncLocalStorage to thread context through async call chains. All LLM calls within `fn` automatically inherit the context for logging.
-- Every call in `src/services/ai/clients.ts` (generateWithClaude, generateWithGemini, generateWithGeminiGroundedSearch) calls `logCall()` on success and failure.
+- Every call in `src/services/ai/clients.ts` (`generateText`, `generateWithWebSearch`, `generateJSON`, `generateImage`, `streamText`) calls `logCall()` on success and failure.
 
 ## 5 Generation Pipelines
 
@@ -133,7 +133,7 @@ Scoring is centralized in `src/services/quality/score-content.ts`. All 5 scorers
 The workspace provides a session-based UI for creating, refining, and managing messaging assets.
 
 ### Core Components
-- **Sessions** (`src/services/workspace/sessions.ts`) — Create sessions with pain point, voice profile(s), asset types, product docs, pipeline selection. Auto-names via Gemini Flash from extracted insights.
+- **Sessions** (`src/services/workspace/sessions.ts`) — Create sessions with pain point, voice profile(s), asset types, product docs, pipeline selection. Auto-names via grok-4.7 from extracted insights.
 - **Versions** (`src/services/workspace/versions.ts`) — Every change creates a new version with scores. `isActive` flag tracks which version is current. Supports activation of any previous version.
 - **Chat** (`src/services/workspace/chat-context.ts`) — Conversational refinement with context assembly (system prompt + voice guide + product context + active versions + message history). 150K token budget with oldest-first trimming.
 - **Actions** (`src/services/workspace/actions.ts`) — Workspace-specific actions: deslop, regenerate, voice change, adversarial loop, competitive deep dive, community check, multi-perspective rewrite. All compose from pipeline primitives.
@@ -189,7 +189,7 @@ src/
     seed.ts                             # Seed data (voice profiles, priorities)
   services/
     ai/
-      clients.ts                        # Gemini + Claude clients, grounded search, deep research, JSON generation
+      clients.ts                        # xAI grok-4.7 text, web search, images, JSON
       call-logger.ts                    # Fire-and-forget LLM call logging
       call-context.ts                   # AsyncLocalStorage context threading
       types.ts                          # AI type definitions
@@ -265,8 +265,7 @@ tests/
     quality/                            # gates, score-content, slop-detector, product-filter
     workspace/                          # versions, chat-context, naming, multi-voice, version-activation, adversarial-loop, go-outside-integrity, actions-integrity
   integration/                          # Integration tests
-    naming-gemini.test.ts               # Session naming with real Gemini
-  debug/                                # Debug utilities
+    ai/xai-client.test.ts               # Mocked xAI request contract
 
 admin/                                  # Vite + React admin/workspace UI
 vitest.config.ts                        # 5min timeout, forks pool, single fork (SQLite)
@@ -278,12 +277,12 @@ start.sh / stop.sh                      # PM2 start/stop wrappers
 ## Evidence & Research
 
 ### Grounded Search
-- `generateWithGeminiGroundedSearch()` uses Gemini's `googleSearch` tool
-- Retries up to 5x on empty results (flaky API behavior)
-- Extracts sources from `groundingMetadata.groundingChunks`
+- `generateWithWebSearch()` calls grok-4.7 with the xAI `web_search` tool
+- Retries up to 5x on empty results
+- Extracts sources from response citations
 
 ### Community Deep Research
-- Uses Gemini Deep Research agent for multi-step web research
+- Uses grok-4.7 web search for practitioner research
 - Searches Reddit, HN, Stack Overflow, GitHub Issues, dev blogs
 - Returns practitioner quotes, source URLs, evidence level classification
 - Evidence levels: `strong` (3+ sources, 2+ types), `partial` (1+ source or grounded search), `product-only`
@@ -325,7 +324,7 @@ npm install
 
 # Environment variables
 cp .env.example .env
-# Required: GOOGLE_AI_API_KEY, ANTHROPIC_API_KEY, JWT_SECRET, ADMIN_USERNAME, ADMIN_PASSWORD
+# Required: XAI_API_KEY, JWT_SECRET, ADMIN_USERNAME, ADMIN_PASSWORD
 
 # Database
 npx drizzle-kit push
@@ -341,8 +340,8 @@ cd admin && npm install && npm run build && cd ..
 ./deploy.sh
 
 # Tests
-npm test                           # unit tests (MODEL_PROFILE=economy)
-npm run test:e2e                   # e2e tests (5min timeout)
+npm test                           # mocked network; live model calls skipped
+npm run test:e2e                   # opt-in live tests, api.x.ai only, needs XAI_API_KEY
 ```
 
 ### Key Environment Variables
@@ -351,8 +350,7 @@ npm run test:e2e                   # e2e tests (5min timeout)
 |----------|----------|-------------|
 | `PORT` | No (3007) | API server port (nginx proxies 91 → 3007) |
 | `DATABASE_URL` | No (./data/messaging-engine.db) | SQLite database path |
-| `GOOGLE_AI_API_KEY` | Yes | Google AI API key |
-| `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
+| `XAI_API_KEY` | Yes | xAI API key for grok-4.7 and grok-imagine-image-2.0 |
 | `JWT_SECRET` | Yes | JWT signing secret (must change in production) |
 | `ADMIN_USERNAME` | Yes | Default admin username |
 | `ADMIN_PASSWORD` | Yes | Default admin password |
@@ -393,7 +391,7 @@ The outside-in pipeline previously fell back silently to standard when no eviden
 Product doc layering in the outside-in pipeline was removed because it overrode the practitioner voice. Be cautious about mixing product positioning into practitioner-first content.
 
 ### Grounded Search Is Flaky
-Gemini grounded search returns 200 OK with 0 results non-deterministically. Always retry (currently 5x). Same prompt returns rich results on retry.
+Web search can return an empty body. Retry up to 5 times before treating the result as product-only.
 
 ### Domain-Agnostic Prompts Only
 No hardcoded vertical, practitioner, or product-category language in prompts. All domain context comes from extracted insights. The engine works for any product.

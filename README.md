@@ -34,7 +34,7 @@ The app is a Node.js + TypeScript service with a React admin/workspace UI, SQLit
 | Pipeline engine | Runs the selected generation loop |
 | Evidence services | Community and competitive research |
 | Quality services | Slop, vendor-speak, authenticity, specificity, and persona-fit scoring |
-| AI client layer | Gemini, Deep Research, and optional Claude routing |
+| AI client layer | xAI grok-4.7 text and web search; grok-imagine-image-2.0 images |
 | SQLite database | Sessions, assets, variants, traceability, jobs, and LLM call logs |
 
 ## Agentic Pipeline Loops
@@ -273,8 +273,7 @@ This makes the system inspectable instead of mystical. Which, frankly, is where 
 - Node.js 22+
 - npm
 - SQLite-compatible local filesystem
-- Gemini API key
-- Anthropic API key if using Claude-backed calls
+- xAI API key (`XAI_API_KEY`)
 
 ### Setup
 
@@ -305,7 +304,7 @@ npm run dev
 npm test
 ```
 
-End-to-end tests call real model APIs and may take several minutes:
+`npm test` mocks the network and skips live model calls. Opt-in end-to-end tests call only `api.x.ai` and need `XAI_API_KEY`:
 
 ```bash
 npm run test:e2e

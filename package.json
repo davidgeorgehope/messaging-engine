@@ -18,11 +18,9 @@
     "admin:build": "cd admin && npm run build",
     "test": "MODEL_PROFILE=economy vitest run",
     "test:unit": "MODEL_PROFILE=economy vitest run tests/unit/",
-    "test:e2e": "MODEL_PROFILE=economy vitest run tests/e2e/ --test-timeout 600000 2>&1 | tee test-e2e.log"
+    "test:e2e": "MODEL_PROFILE=economy RUN_LIVE_AI_TESTS=1 vitest run tests/e2e/ --test-timeout 600000 2>&1 | tee test-e2e.log"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
-    "@google/genai": "^1.0.0",
     "@hono/node-server": "^2.1.5",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.7.0",

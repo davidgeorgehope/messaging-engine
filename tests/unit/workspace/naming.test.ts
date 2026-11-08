@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../../src/services/ai/clients.js', () => ({
-  generateWithGemini: vi.fn(),
+  generateText: vi.fn(),
 }));
 
 vi.mock('../../../src/utils/logger.js', () => ({
@@ -65,12 +65,12 @@ vi.mock('../../../src/services/workspace/versions.js', () => ({
   createInitialVersions: vi.fn(),
 }));
 
-import { generateWithGemini } from '../../../src/services/ai/clients.js';
+import { generateText } from '../../../src/services/ai/clients.js';
 import { nameSessionFromInsights } from '../../../src/services/workspace/sessions.js';
 import type { ExtractedInsights } from '../../../src/services/product/insights.js';
 import type { AssetType } from '../../../src/services/generation/types.js';
 
-const mockedGenerate = vi.mocked(generateWithGemini);
+const mockedGenerate = vi.mocked(generateText);
 
 const SAMPLE_INSIGHTS: ExtractedInsights = {
   summary: "CaseFlow is Acme's workflow automation engine that coordinates approvals, escalations, and handoffs across customer operations",
@@ -93,14 +93,14 @@ describe('nameSessionFromInsights', () => {
   });
 
   it('should pass a well-formed prompt to Gemini', async () => {
-    mockedGenerate.mockResolvedValue({ text: 'Workflow Automation Narrative', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }, model: 'gemini', latencyMs: 100 });
+    mockedGenerate.mockResolvedValue({ text: 'Workflow Automation Narrative', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }, model: 'grok-4.7', latencyMs: 100 });
 
     await nameSessionFromInsights('job-456', SAMPLE_INSIGHTS, ['narrative'] as AssetType[]);
 
     expect(mockedGenerate).toHaveBeenCalledTimes(1);
     const [prompt, options] = mockedGenerate.mock.calls[0];
 
-    console.log('\n=== PROMPT SENT TO GEMINI ===');
+    console.log('\n=== PROMPT SENT TO XAI ===');
     console.log(prompt);
     console.log('\n=== OPTIONS ===');
     console.log(JSON.stringify(options, null, 2));
@@ -111,7 +111,7 @@ describe('nameSessionFromInsights', () => {
   });
 
   it('should update session name when Gemini returns valid name', async () => {
-    mockedGenerate.mockResolvedValue({ text: 'Workflow Automation Narrative', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }, model: 'gemini', latencyMs: 100 });
+    mockedGenerate.mockResolvedValue({ text: 'Workflow Automation Narrative', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }, model: 'grok-4.7', latencyMs: 100 });
 
     await nameSessionFromInsights('job-456', SAMPLE_INSIGHTS, ['narrative'] as AssetType[]);
 
@@ -123,7 +123,7 @@ describe('nameSessionFromInsights', () => {
   });
 
   it('should handle empty string response from Gemini', async () => {
-    mockedGenerate.mockResolvedValue({ text: '', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }, model: 'gemini', latencyMs: 100 });
+    mockedGenerate.mockResolvedValue({ text: '', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }, model: 'grok-4.7', latencyMs: 100 });
 
     await nameSessionFromInsights('job-456', SAMPLE_INSIGHTS, ['narrative'] as AssetType[]);
 
@@ -131,7 +131,7 @@ describe('nameSessionFromInsights', () => {
   });
 
   it('should handle undefined text in Gemini response', async () => {
-    mockedGenerate.mockResolvedValue({ text: undefined as any, usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }, model: 'gemini', latencyMs: 100 });
+    mockedGenerate.mockResolvedValue({ text: undefined as any, usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }, model: 'grok-4.7', latencyMs: 100 });
 
     await nameSessionFromInsights('job-456', SAMPLE_INSIGHTS, ['narrative'] as AssetType[]);
 
@@ -139,7 +139,7 @@ describe('nameSessionFromInsights', () => {
   });
 
   it('should strip quotes from Gemini response', async () => {
-    mockedGenerate.mockResolvedValue({ text: "'Workflow Automation Narrative'", usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }, model: 'gemini', latencyMs: 100 });
+    mockedGenerate.mockResolvedValue({ text: "'Workflow Automation Narrative'", usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 }, model: 'grok-4.7', latencyMs: 100 });
 
     await nameSessionFromInsights('job-456', SAMPLE_INSIGHTS, ['narrative'] as AssetType[]);
 
