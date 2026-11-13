@@ -21,12 +21,12 @@
     "test:e2e": "MODEL_PROFILE=economy RUN_LIVE_AI_TESTS=1 vitest run tests/e2e/ --test-timeout 600000 2>&1 | tee test-e2e.log"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.5",
+    "@hono/node-server": "^2.1.8",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.7",
     "drizzle-orm": "0.45.2",
-    "hono": "^4.13.11",
+    "hono": "^4.13.18",
     "jose": "^5.9.6",
     "pdf-parse": "^2.4.5",
     "zod": "4.6.6"
